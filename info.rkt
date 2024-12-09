@@ -2,7 +2,8 @@
 (define collection "syndicate-sandbox")
 (define deps '("base"
                "rackunit"
-               "syndicate-classic"))
+               "syndicate-classic"
+               "web-server-lib"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/syndicate-sandbox.scrbl" ())))
 (define pkg-desc "Description Here")

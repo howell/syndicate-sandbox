@@ -20,8 +20,8 @@
 ;; a Session is a (session ID Procedure InputPort InputPort)
 (struct session (id sandbox-eval std-output error-output) #:transparent)
 
-(define (new-session #:memory [memory-limit DEFAULT-MEMORY-LIMIT])
-  (define id (gensym 'session))
+(define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-MEMORY-LIMIT])
+  (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
   (define evaluator
