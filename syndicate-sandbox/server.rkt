@@ -9,15 +9,17 @@
          web-server/servlet-env
          web-server/http/json
          web-server/dispatch
-         web-server/http/request-structs)
+         web-server/http/request-structs
+         net/http-client)
 
 (define-logger sandbox-server)
 
 (define session-envs (make-hash))
 
 (define (create-session id)
-  (hash-set! session-envs id
-             (new-session #:id id)))
+  (define s (new-session #:id id))
+  (hash-set! session-envs id s)
+  (service-session s))
 
 (define (evaluate-code id code)
   (define env (hash-ref session-envs id #f))
@@ -70,3 +72,39 @@
 (define (timestamp)
   (parameterize ([date-display-format 'iso-8601])
     (date->string (current-date) #t)))
+
+(define (service-session s)
+  (thread
+   (lambda ()
+     (define stdout-evt (push-output (session-id s) (session-std-output s) 'stdout))
+     (define stderr-evt (push-output (session-id s) (session-error-output s) 'stderr))
+     (let loop ()
+       (when (sync stdout-evt stderr-evt)
+         (loop)))
+     (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) (session-id s)))))
+
+(define (push-output id port type)
+  (handle-evt port
+              (lambda (_p)
+                (log-sandbox-server-info "~a: Reading output from ~a for session ~a" (timestamp) type id)
+                (define out (read-string (pipe-content-length port) port))
+                (and (post-http! id type out)
+                     (not (eof-object? out))))))
+
+(define PHOENIX-HOST "localhost")
+(define PHOENIX-PORT 4000)
+
+(define (post-http! id type data)
+  (log-sandbox-server-info "~a: Sending session ~a output on ~a" (timestamp) id type)
+  (define conn? (http-conn-open PHOENIX-HOST
+                               #:ssl? #f
+                               #:port PHOENIX-PORT))
+  (if conn?
+      (begin
+        (http-conn-send! conn?
+                         (format "/api/sessions/~a" id)
+                         #:method "POST"
+                         #:headers (list "Content-Type: application/json")
+                         #:data (jsexpr->string (hash 'type (~a type) 'data data)))
+        (http-conn-close! conn?))
+      (log-sandbox-server-info "~a: Unable to connect to ~a:~a" (timestamp) PHOENIX-HOST PHOENIX-PORT)))
