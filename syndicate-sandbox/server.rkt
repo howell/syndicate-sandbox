@@ -14,11 +14,13 @@
 
 (define-logger sandbox-server)
 
+(struct active-session (session last-activity) #:transparent)
+
 (define session-envs (make-hash))
 
 (define (create-session id)
   (define s (new-session #:id id))
-  (hash-set! session-envs id s)
+  (hash-set! session-envs id (active-session s (current-inexact-milliseconds)))
   (service-session s))
 
 (define (evaluate-code id code)
@@ -26,7 +28,9 @@
   (if env
       (with-handlers ([exn:fail?
                        (λ (e) (format "Error: ~a" (exn-message e)))])
-        (session-eval env code))
+        (begin
+          (hash-set! session-envs id (active-session (active-session-session env) (current-inexact-milliseconds)))
+          (session-eval (active-session-session env) code)))
       "Error: Session not found"))
 
 (define (handle-new-session req)
@@ -73,15 +77,20 @@
   (parameterize ([date-display-format 'iso-8601])
     (date->string (current-date) #t)))
 
+(define IDLE-TIMEOUT-MILLIS (* 1000 60 5))
+
 (define (service-session s)
+  (define id (session-id s))
   (thread
    (lambda ()
-     (define stdout-evt (push-output (session-id s) (session-std-output s) 'stdout))
-     (define stderr-evt (push-output (session-id s) (session-error-output s) 'stderr))
+     (define stdout-evt (push-output id (session-std-output s) 'stdout))
+     (define stderr-evt (push-output id (session-error-output s) 'stderr))
      (let loop ()
-       (when (sync stdout-evt stderr-evt)
+       (define timeout-evt (wait-for id))
+       
+       (when (sync stdout-evt stderr-evt timeout-evt)
          (loop)))
-     (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) (session-id s)))))
+     (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) id))))
 
 (define (push-output id port type)
   (handle-evt port
@@ -108,3 +117,13 @@
                          #:data (jsexpr->string (hash 'type (~a type) 'data data)))
         (http-conn-close! conn?))
       (log-sandbox-server-info "~a: Unable to connect to ~a:~a" (timestamp) PHOENIX-HOST PHOENIX-PORT)))
+
+(define (wait-for id)
+  (define the-session (hash-ref session-envs id #f))
+  (define last-active (if the-session
+                          (active-session-last-activity the-session)
+                          (current-inexact-milliseconds)))
+  (handle-evt (alarm-evt (+ last-active IDLE-TIMEOUT-MILLIS))
+              (lambda (_)
+                (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
+                #f)))
