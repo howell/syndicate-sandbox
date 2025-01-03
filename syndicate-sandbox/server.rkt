@@ -1,6 +1,8 @@
 #lang racket
 
-(provide run-server)
+(provide run-server
+         phx-host
+         phx-port)
 
 (require "session.rkt"
          racket/date
@@ -17,6 +19,10 @@
 (struct active-session (session last-activity) #:transparent)
 
 (define session-envs (make-hash))
+
+(define phx-host (make-parameter "localhost"))
+(define phx-port (make-parameter 4000))
+
 
 (define (create-session id)
   (define s (new-session #:id id))
@@ -65,10 +71,12 @@
   (log-sandbox-server-info "~a: Received ~a request to ~a" (timestamp) (request-method req) (url->string (request-uri req)))
   (dispatch-request req))
 
-(define (run-server #:port [port 4001])
+(define (run-server #:host host
+                    #:port port)
   (log-sandbox-server-info "~a: Server running on port ~a" (timestamp) port)
   (serve/servlet handle-request
                  #:port port
+                 #:listen-ip host
                  #:command-line? #t
                  #:servlet-regexp #rx""))
 
@@ -100,14 +108,11 @@
                 (and (post-http! id type out)
                      (not (eof-object? out))))))
 
-(define PHOENIX-HOST "localhost")
-(define PHOENIX-PORT 4000)
-
 (define (post-http! id type data)
   (log-sandbox-server-info "~a: Sending session ~a output on ~a" (timestamp) id type)
-  (define conn? (http-conn-open PHOENIX-HOST
+  (define conn? (http-conn-open (phx-host)
                                #:ssl? #f
-                               #:port PHOENIX-PORT))
+                               #:port (phx-port)))
   (if conn?
       (begin
         (http-conn-send! conn?
@@ -116,7 +121,7 @@
                          #:headers (list "Content-Type: application/json")
                          #:data (jsexpr->string (hash 'type (~a type) 'data data)))
         (http-conn-close! conn?))
-      (log-sandbox-server-info "~a: Unable to connect to ~a:~a" (timestamp) PHOENIX-HOST PHOENIX-PORT)))
+      (log-sandbox-server-info "~a: Unable to connect to ~a:~a" (timestamp) (phx-host) (phx-port))))
 
 (define (wait-for id)
   (define the-session (hash-ref session-envs id #f))
