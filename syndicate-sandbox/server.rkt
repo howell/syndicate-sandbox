@@ -20,8 +20,11 @@
 
 (define session-envs (make-hash))
 
-(define phx-host (make-parameter "localhost"))
-(define phx-port (make-parameter 4000))
+(define phx-host (make-parameter (or (getenv "PHX_HOST") "localhost")))
+(define phx-port (make-parameter (let ([p (getenv "PHX_PORT")])
+                                   (if p
+                                       (string->number p)
+                                       4000))))
 
 
 (define (create-session id)

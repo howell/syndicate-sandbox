@@ -3,13 +3,18 @@
 (require "syndicate-sandbox/server.rkt"
          racket/cmdline)
 
-(define serve-host (make-parameter "127.0.0.1"))
-(define serve-port (make-parameter 4001))
+(define serve-host (make-parameter (or (getenv "RKT_HOST") "127.0.0.1")))
+(define serve-port (make-parameter (let ([p (getenv "RKT_PORT")])
+                                     (if p
+                                         (string->number p)
+                                         4001))))
 
 (command-line
  #:once-each
  [("-l") "listen on all IP addresses"
          (serve-host #f)]
+ [("--host") h "specify the host IP addr of the server"
+                  (serve-host h)]
  [("-p" "--port") p "specify the port of the server"
                   (serve-port (string->number p))]
  [("--phx-host") ph "Specify the hostname of the phoenix server"
