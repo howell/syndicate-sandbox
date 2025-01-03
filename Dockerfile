@@ -15,5 +15,5 @@ EXPOSE 4001
 
 ENV PLTSTDERR="error info@sandbox-server"
 
-# Command to start the service
-CMD ["racket", "main.rkt"]
+# Command to start the service listening on all IP addrs
+CMD ["racket", "main.rkt", "-l"]
