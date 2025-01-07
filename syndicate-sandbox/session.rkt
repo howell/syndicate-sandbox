@@ -28,9 +28,9 @@
     (parameterize ([sandbox-output std-out]
                    [sandbox-error-output err-out]
                    [sandbox-memory-limit memory-limit])
-      (make-evaluator 'syndicate/lang
-                      '(require syndicate/drivers/repl
-                                racket
+      (make-evaluator 'racket
+                      '(require (except-in syndicate/interactive-lang #%module-begin)
+                                syndicate/drivers/repl
                                 racket/async-channel)
                       '(let ([ready-chan (make-async-channel)])
                          (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
@@ -72,7 +72,13 @@
                   'ok)
     (check-equal? (session-eval s '(begin (require syndicate/trie)
                                           (trie-key-set/single (do-query 'hello))))
-                  (set 'hello)))
+                  (set 'hello))
+    (flush-session s)
+    (check-equal? (session-eval s '(spawn (on-start (display 'jeepers))))
+                  'ok)
+    (sleep 0.1)
+    (check-equal? (get-session-output s)
+                  "jeepers"))
 
   (test-case
       "can define and work with structs in the sandbox"
