@@ -31,11 +31,21 @@
       (make-evaluator 'racket
                       '(require (except-in syndicate/interactive-lang #%module-begin)
                                 syndicate/drivers/repl
-                                racket/async-channel)
+                                racket/async-channel
+                                racket/logging)
                       '(void
                         (let ([ready-chan (make-async-channel)])
-                         (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
-                         (async-channel-get ready-chan))))))
+                          (thread (lambda ()
+                                    (define receiver (make-log-receiver (current-logger) 'info 'syndicate-repl))
+                                    (async-channel-put ready-chan 'ok)
+                                    (let loop ()
+                                      (sync (handle-evt receiver
+                                                        (lambda (v)
+                                                          (displayln (vector-ref v 1) (current-error-port)))))
+                                      (loop))))
+                          (async-channel-get ready-chan)
+                          (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
+                          (async-channel-get ready-chan))))))
   (session id evaluator std-in err-in))
 
 (define (kill-session s)
