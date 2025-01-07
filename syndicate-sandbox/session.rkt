@@ -32,9 +32,10 @@
                       '(require (except-in syndicate/interactive-lang #%module-begin)
                                 syndicate/drivers/repl
                                 racket/async-channel)
-                      '(let ([ready-chan (make-async-channel)])
+                      '(void
+                        (let ([ready-chan (make-async-channel)])
                          (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
-                         (async-channel-get ready-chan)))))
+                         (async-channel-get ready-chan))))))
   (session id evaluator std-in err-in))
 
 (define (kill-session s)
