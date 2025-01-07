@@ -8,7 +8,7 @@ WORKDIR /app
 COPY . /app
 
 # Install the Racket package
-RUN raco pkg install --auto /app
+RUN raco pkg install -D --auto /app
 
 # Expose the port your service listens on
 EXPOSE 4001
