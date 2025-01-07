@@ -13,7 +13,7 @@ RUN raco pkg install -D --auto /app
 # Expose the port your service listens on
 EXPOSE 4001
 
-ENV PLTSTDERR="error info@sandbox-server"
+ENV PLTSTDERR="error info@sandbox-server info@syndicate-repl"
 
 # Command to start the service listening on all IP addrs
 CMD ["racket", "main.rkt", "-l"]
