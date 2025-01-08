@@ -33,14 +33,19 @@
   (service-session s))
 
 (define (evaluate-code id code)
-  (define env (hash-ref session-envs id #f))
-  (if env
+  (define s (hash-ref session-envs id #f))
+  (if s
       (with-handlers ([exn:fail?
                        (λ (e) (format "Error: ~a" (exn-message e)))])
         (begin
-          (hash-set! session-envs id (active-session (active-session-session env) (current-inexact-milliseconds)))
-          (session-eval (active-session-session env) code)))
+          (mark-activity! s)
+          (session-eval (active-session-session s) code)))
       "Error: Session not found"))
+
+(define (mark-activity! s)
+  (hash-set! session-envs
+             (session-id (active-session-session s))
+             (active-session (active-session-session s) (current-inexact-milliseconds))))
 
 (define (handle-new-session req)
   (define msg (bytes->jsexpr (request-post-data/raw req)))
@@ -56,7 +61,16 @@
   (define code (hash-ref msg 'code))
   (response/jsexpr (hash 'status "ok" 'result (~a (evaluate-code id code)))))
 
-(define (handle-unknown req)
+(define (handle-status _req id)
+  (log-sandbox-server-info "~a: Received status request for session ~a" (timestamp) id)
+  (match (hash-ref session-envs id #f)
+    [#f
+     (response/jsexpr #:code 404 "")]
+    [s
+     (mark-activity! s)
+     (response/jsexpr #:code 200 "")]))
+
+(define (handle-unknown _req)
   (response/jsexpr (hash 'status "Unknown command")))
 
 (define-values (dispatch-request format-url)
@@ -67,6 +81,9 @@
    [("submit")
     #:method "post"
     handle-submit]
+   [("status" (string-arg))
+    #:method "get"
+    handle-status]
    [else
     handle-unknown]))
 
@@ -134,4 +151,5 @@
   (handle-evt (alarm-evt (+ last-active IDLE-TIMEOUT-MILLIS))
               (lambda (_)
                 (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
+                (hash-remove! session-envs id)
                 #f)))
