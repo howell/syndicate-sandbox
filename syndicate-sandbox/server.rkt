@@ -39,7 +39,10 @@
                        (λ (e) (format "Error: ~a" (exn-message e)))])
         (begin
           (mark-activity! s)
-          (session-eval (active-session-session s) code)))
+          (let ([result (session-eval (active-session-session s) code)])
+            (if (void? result)
+                ""
+                (~v result)))))
       "Error: Session not found"))
 
 (define (mark-activity! s)
@@ -59,7 +62,7 @@
   (log-sandbox-server-info "~a: Received code submission request with body ~a" (timestamp) msg)
   (define id (hash-ref msg 'session_id))
   (define code (hash-ref msg 'code))
-  (response/jsexpr (hash 'status "ok" 'result (~a (evaluate-code id code)))))
+  (response/jsexpr (hash 'status "ok" 'result (evaluate-code id code))))
 
 (define (handle-status _req id)
   (log-sandbox-server-info "~a: Received status request for session ~a" (timestamp) id)
