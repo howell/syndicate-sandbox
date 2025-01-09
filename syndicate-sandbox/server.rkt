@@ -64,6 +64,19 @@
   (define code (hash-ref msg 'code))
   (response/jsexpr (hash 'status "ok" 'result (evaluate-code id code))))
 
+(define (handle-keep-alive req)
+  (define msg (bytes->jsexpr (request-post-data/raw req)))
+  (log-sandbox-server-info "~a: Received keep alive request with body ~a" (timestamp) msg)
+  (define id (hash-ref msg 'session_id))
+  (define s (hash-ref session-envs id #f))
+  (cond
+    [s
+     (mark-activity! s)
+     (response/jsexpr (hash 'status "ok"))]
+    [else
+     (response/jsexpr #:code 404 "")])
+  )
+
 (define (handle-status _req id)
   (log-sandbox-server-info "~a: Received status request for session ~a" (timestamp) id)
   (match (hash-ref session-envs id #f)
@@ -87,6 +100,9 @@
    [("status" (string-arg))
     #:method "get"
     handle-status]
+   [("keep_alive")
+    #:method "post"
+    handle-keep-alive]
    [else
     handle-unknown]))
 
@@ -148,15 +164,29 @@
       (log-sandbox-server-warning "~a: Unable to connect to ~a:~a" (timestamp) (phx-host) (phx-port))))
 
 (define (wait-for id)
-  (define the-session (hash-ref session-envs id #f))
-  (define last-active (if the-session
-                          (active-session-last-activity the-session)
-                          (current-inexact-milliseconds)))
-  (handle-evt (alarm-evt (+ last-active IDLE-TIMEOUT-MILLIS))
+  (define deadline (or deadline-for id (current-inexact-milliseconds)))
+  (handle-evt (alarm-evt deadline)
               (lambda (_)
-                (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
-                (define url (format "/api/sessions/~a/terminate" id))
-                (define msg (hash 'reason "idle"))
-                (post-http! url msg)
-                (hash-remove! session-envs id)
-                #f)))
+                (cond
+                  [(past-deadline? id)
+                  (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
+                  (notify-idle! id)
+                  (hash-remove! session-envs id)
+                  #f]
+                  [else
+                   #t]))))
+
+(define (deadline-for id)
+  (define the-session (hash-ref session-envs id #f))
+  (and the-session
+       (+ (active-session-last-activity the-session) IDLE-TIMEOUT-MILLIS)))
+
+(define (past-deadline? id)
+  (define current-deadline (deadline-for id))
+  (or (not current-deadline)
+      (< current-deadline (current-inexact-milliseconds))))
+
+(define (notify-idle! id)
+  (define url (format "/api/sessions/~a/terminate" id))
+  (define msg (hash 'reason "idle"))
+  (post-http! url msg))
