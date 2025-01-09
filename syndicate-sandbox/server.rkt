@@ -118,7 +118,6 @@
      (define stderr-evt (push-output id (session-error-output s) 'stderr))
      (let loop ()
        (define timeout-evt (wait-for id))
-       
        (when (sync stdout-evt stderr-evt timeout-evt)
          (loop)))
      (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) id))))
@@ -128,23 +127,25 @@
               (lambda (_p)
                 (log-sandbox-server-info "~a: Reading output from ~a for session ~a" (timestamp) type id)
                 (define out (read-string (pipe-content-length port) port))
-                (and (post-http! id type out)
+                (log-sandbox-server-info "~a: Sending session ~a output on ~a" (timestamp) id type)
+                (define url (format "/api/sessions/~a/output" id))
+                (define msg (hash 'type (~a type) 'data out))
+                (and (post-http! url msg)
                      (not (eof-object? out))))))
 
-(define (post-http! id type data)
-  (log-sandbox-server-info "~a: Sending session ~a output on ~a" (timestamp) id type)
+(define (post-http! url data)
   (define conn? (http-conn-open (phx-host)
-                               #:ssl? #f
-                               #:port (phx-port)))
+                                #:ssl? #f
+                                #:port (phx-port)))
   (if conn?
       (begin
         (http-conn-send! conn?
-                         (format "/api/sessions/~a" id)
+                         url
                          #:method "POST"
                          #:headers (list "Content-Type: application/json")
-                         #:data (jsexpr->string (hash 'type (~a type) 'data data)))
+                         #:data (jsexpr->string data))
         (http-conn-close! conn?))
-      (log-sandbox-server-info "~a: Unable to connect to ~a:~a" (timestamp) (phx-host) (phx-port))))
+      (log-sandbox-server-warning "~a: Unable to connect to ~a:~a" (timestamp) (phx-host) (phx-port))))
 
 (define (wait-for id)
   (define the-session (hash-ref session-envs id #f))
@@ -154,5 +155,8 @@
   (handle-evt (alarm-evt (+ last-active IDLE-TIMEOUT-MILLIS))
               (lambda (_)
                 (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
+                (define url (format "/api/sessions/~a/terminate" id))
+                (define msg (hash 'reason "idle"))
+                (post-http! url msg)
                 (hash-remove! session-envs id)
                 #f)))
