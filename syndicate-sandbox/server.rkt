@@ -164,7 +164,7 @@
       (log-sandbox-server-warning "~a: Unable to connect to ~a:~a" (timestamp) (phx-host) (phx-port))))
 
 (define (wait-for id)
-  (define deadline (or deadline-for id (current-inexact-milliseconds)))
+  (define deadline (or (deadline-for id) (current-inexact-milliseconds)))
   (handle-evt (alarm-evt deadline)
               (lambda (_)
                 (cond
