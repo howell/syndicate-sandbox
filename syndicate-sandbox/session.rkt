@@ -15,12 +15,12 @@
   (require rackunit))
 
 (define PIPE-BUFFER-SIZE (* 64 1024))
-(define DEFAULT-MEMORY-LIMIT (* 16 1024 1024))
+(define DEFAULT-MEMORY-LIMIT-MB 16)
 
 ;; a Session is a (session ID Procedure InputPort InputPort)
 (struct session (id sandbox-eval std-output error-output) #:transparent)
 
-(define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-MEMORY-LIMIT])
+(define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
