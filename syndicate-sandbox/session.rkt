@@ -7,7 +7,8 @@
          session-alive?
          kill-session
          session-eval
-         flush-session)
+         flush-session
+         session-memory-usage)
 
 (require racket/sandbox)
 
@@ -15,19 +16,25 @@
   (require rackunit))
 
 (define PIPE-BUFFER-SIZE (* 64 1024))
-(define DEFAULT-MEMORY-LIMIT-MB 16)
+(define DEFAULT-SANDBOX-MEMORY-LIMIT-MB 16)
+(define DEFAULT-INTERACTION-MEMORY-LIMIT-MB 1)
+(define DEFAULT-INTERACTION-TIME-LIMIT-S 1)
 
 ;; a Session is a (session ID Procedure InputPort InputPort)
 (struct session (id sandbox-eval std-output error-output) #:transparent)
 
-(define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-MEMORY-LIMIT-MB])
+(define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-SANDBOX-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
   (define evaluator
     (parameterize ([sandbox-output std-out]
                    [sandbox-error-output err-out]
-                   [sandbox-memory-limit memory-limit])
+                   [sandbox-memory-limit memory-limit]
+                   [sandbox-eval-limits (list DEFAULT-INTERACTION-TIME-LIMIT-S
+                                              DEFAULT-INTERACTION-MEMORY-LIMIT-MB)]
+                   [sandbox-eval-handlers (list #f
+                                                call-with-killing-threads)])
       (make-evaluator 'racket
                       '(require (except-in syndicate/interactive-lang #%module-begin)
                                 syndicate/drivers/repl
@@ -68,6 +75,11 @@
 
 (define (flush-session s)
   (void (get-session-output s) (get-session-error-output s)))
+
+(define (session-memory-usage s)
+  (let* ([evaluator (session-sandbox-eval s)]
+         [custodian (get-user-custodian evaluator)])
+    (current-memory-use custodian)))
 
 (module+ test
   (test-case
@@ -135,10 +147,59 @@
     (define s (new-session))
     (define allocator '(let loop ([l (list)])
                          (loop (cons 1 l))))
-    (check-exn exn:fail:resource?
-               (lambda () (session-eval s allocator)))
+    (check-exn #rx"out of memory|out-of-memory"
+               (lambda () (session-eval s allocator))))
+
+  (test-case
+      "sandbox memory limit with make-bytes allocator"
+    (define s (new-session))
+    (define allocator `(for/list ([i (in-range ,(+ 4 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
+                         (collect-garbage)
+                         (make-bytes 1000000)))
     (check-exn #rx"out of memory"
                (lambda () (session-eval s allocator))))
+
+  (test-case
+      "sandbox memory limit with set! allocator"
+    (define s (new-session))
+    (define allocator `(let ()
+                        (define a '())
+                        (for ([i (in-range ,(add1 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
+                          (set! a (cons (make-bytes 1000000) a))
+                          (collect-garbage))))
+    (check-exn #rx"out of memory"
+               (lambda () (session-eval s allocator))))
+
+  #;(test-case
+      "sandbox memory limit with set! allocator, top level"
+    (define s (new-session #:memory 2))
+    (session-eval s '(define a (list)))
+    #;(define allocator "(define a '())
+                       (for ([i (in-range 100)])
+                         (set! a (cons (make-bytes 1000000) a))
+                         (collect-garbage))")
+    (define allocator `(begin
+                         (set! a (cons (make-bytes 1000000) a))
+                         (collect-garbage)))
+    (check-exn exn:fail:resource?
+               (lambda () (for ([i (in-range 5)])
+                            (session-eval s allocator)))))
+
+  (test-case
+      "sandbox enforces shallow time limit"
+    (define s (new-session))
+    (define code `(begin (sleep ,(add1 DEFAULT-INTERACTION-TIME-LIMIT-S)) 'done))
+    (check-exn exn:fail:resource?
+               (lambda () (session-eval s code)))
+    (check-exn #rx"out of time"
+               (lambda () (session-eval s code))))
+
+  (test-case
+      "sandbox kills created threads"
+    (define s (new-session))
+    (define t (session-eval s '(thread (lambda () (sleep 10)))))
+    (sleep 0.1)
+    (check-true (thread-dead? t)))
 
   (test-case
       "sandbox restricts file system access"
@@ -189,3 +250,5 @@
                (lambda () (session-eval s '(system* "echo" "hi"))))
     (check-exn #rx"`execute' access denied"
                (lambda () (session-eval s '(system* "echo" "hi"))))))
+
+
