@@ -175,6 +175,7 @@
                   [(past-deadline? id)
                   (log-sandbox-server-info "~a: session ~a is idle" (timestamp) id)
                   (notify-idle! id)
+                  (terminate! id)
                   (hash-remove! session-envs id)
                   #f]
                   [else
@@ -189,6 +190,11 @@
   (define current-deadline (deadline-for id))
   (or (not current-deadline)
       (< current-deadline (current-inexact-milliseconds))))
+
+(define (terminate! id)
+  (define the-session (hash-ref session-envs id #f))
+  (when the-session
+    (kill-session the-session)))
 
 (define (notify-idle! id)
   (define url (format "/api/sessions/~a/terminate" id))
