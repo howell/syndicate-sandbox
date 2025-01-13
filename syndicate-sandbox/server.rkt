@@ -54,8 +54,12 @@
   (define msg (bytes->jsexpr (request-post-data/raw req)))
   (log-sandbox-server-info "~a: Received new session request with body ~a" (timestamp) msg)
   (define id (hash-ref msg 'session_id))
-  (create-session id)
-  (response/jsexpr (hash 'status "ok")))
+  (with-handlers ([exn?
+                   (lambda (e)
+                     (response/jsexpr #:code 500
+                                      (hash 'reason (exn-message e))))])
+    (create-session id)
+    (response/jsexpr (hash 'status "ok"))))
 
 (define (handle-submit req)
   (define msg (bytes->jsexpr (request-post-data/raw req)))
