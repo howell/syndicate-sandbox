@@ -10,7 +10,8 @@
          flush-session
          session-memory-usage)
 
-(require racket/sandbox)
+(require racket/sandbox
+         racket/runtime-path)
 
 (module+ test
   (require rackunit))
@@ -22,6 +23,8 @@
 
 ;; a Session is a (session ID Procedure InputPort InputPort)
 (struct session (id sandbox-eval std-output error-output) #:transparent)
+
+(define-runtime-path SESSION.RKT "./session.rkt")
 
 (define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-SANDBOX-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
@@ -36,24 +39,31 @@
                    [sandbox-eval-handlers (list #f
                                                 call-with-killing-threads)])
       (make-evaluator 'racket
-                      '(require (except-in syndicate/interactive-lang #%module-begin)
-                                syndicate/drivers/repl
-                                racket/async-channel
-                                racket/logging)
-                      '(void
-                        (let ([ready-chan (make-async-channel)])
-                          (thread (lambda ()
-                                    (define receiver (make-log-receiver (current-logger) 'info 'syndicate-repl))
-                                    (async-channel-put ready-chan 'ok)
-                                    (let loop ()
-                                      (sync (handle-evt receiver
-                                                        (lambda (v)
-                                                          (displayln (vector-ref v 1) (current-error-port)))))
-                                      (loop))))
-                          (async-channel-get ready-chan)
-                          (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
-                          (async-channel-get ready-chan))))))
+                      #:requires (list `(submod ,SESSION.RKT sandbox-init))
+                      '(require (except-in syndicate/interactive-lang #%module-begin))
+                      '(void (init-session)))))
   (session id evaluator std-in err-in))
+
+(module sandbox-init racket/base
+  (provide init-session)
+
+  (require syndicate/drivers/repl
+           (only-in syndicate run-ground)
+           racket/async-channel
+           racket/logging)
+  (define (init-session)
+    (let ([ready-chan (make-async-channel)])
+      (thread (lambda ()
+                (define receiver (make-log-receiver (current-logger) 'info 'syndicate-repl))
+                (async-channel-put ready-chan 'ok)
+                (let loop ()
+                  (sync (handle-evt receiver
+                                    (lambda (v)
+                                      (displayln (vector-ref v 1) (current-error-port)))))
+                  (loop))))
+      (async-channel-get ready-chan)
+      (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
+      (async-channel-get ready-chan))))
 
 (define (kill-session s)
   (kill-evaluator (session-sandbox-eval s)))
