@@ -37,7 +37,8 @@
                    [sandbox-eval-limits (list DEFAULT-INTERACTION-TIME-LIMIT-S
                                               DEFAULT-INTERACTION-MEMORY-LIMIT-MB)]
                    [sandbox-eval-handlers (list #f
-                                                call-with-killing-threads)])
+                                                call-with-killing-threads)]
+                   [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list `(submod ,SESSION.RKT sandbox-init))
                       '(require (except-in syndicate/interactive-lang #%module-begin))
