@@ -128,7 +128,8 @@
   (parameterize ([date-display-format 'iso-8601])
     (date->string (current-date) #t)))
 
-(define IDLE-TIMEOUT-MILLIS (* 1000 60 5))
+(define IDLE-TIMEOUT-MINS 10)
+(define IDLE-TIMEOUT-MILLIS (* IDLE-TIMEOUT-MINS 60 1000))
 
 (define (service-session s)
   (define id (session-id s))
