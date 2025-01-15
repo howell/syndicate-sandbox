@@ -194,7 +194,7 @@
 (define (terminate! id)
   (define the-session (hash-ref session-envs id #f))
   (when the-session
-    (kill-session the-session)))
+    (kill-session (active-session-session the-session))))
 
 (define (notify-idle! id)
   (define url (format "/api/sessions/~a/terminate" id))
