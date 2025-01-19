@@ -40,7 +40,8 @@
                                                 call-with-killing-threads)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
-                      #:requires (list `(submod ,SESSION.RKT sandbox-init))
+                      #:requires (list `(submod ,SESSION.RKT sandbox-init)
+                                       'syndicate/drivers/timestate)
                       '(require (except-in syndicate/interactive-lang #%module-begin))
                       '(void (init-session)))))
   (session id evaluator std-in err-in))
@@ -64,7 +65,8 @@
                   (loop))))
       (async-channel-get ready-chan)
       (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
-      (async-channel-get ready-chan))))
+      (async-channel-get ready-chan)
+      (repl-activate syndicate/drivers/timestate))))
 
 (define (kill-session s)
   (kill-evaluator (session-sandbox-eval s)))
