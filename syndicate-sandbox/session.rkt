@@ -56,7 +56,9 @@
   (define (init-session)
     (let ([ready-chan (make-async-channel)])
       (thread (lambda ()
-                (define receiver (make-log-receiver (current-logger) 'info 'syndicate-repl))
+                (define receiver (make-log-receiver (current-logger)
+                                                    'info 'syndicate-repl
+                                                    'error #f))
                 (async-channel-put ready-chan 'ok)
                 (let loop ()
                   (sync (handle-evt receiver
