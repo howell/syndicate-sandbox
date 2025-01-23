@@ -137,6 +137,7 @@
   (test-case
       "can get error output from sandbox"
     (define s (new-session))
+    (sleep 0.1)
     (flush-session s)
     (check-equal? "" (get-session-error-output s))
     (session-eval s '(display 'worry (current-error-port)))
@@ -201,7 +202,8 @@
   (test-case
       "sandbox enforces shallow time limit"
     (define s (new-session))
-    (define code `(begin (sleep ,(add1 DEFAULT-INTERACTION-TIME-LIMIT-S)) 'done))
+    (session-eval s '(require (only-in racket [sleep rkt:sleep])))
+    (define code `(begin (rkt:sleep ,(add1 DEFAULT-INTERACTION-TIME-LIMIT-S)) 'done))
     (check-exn exn:fail:resource?
                (lambda () (session-eval s code)))
     (check-exn #rx"out of time"
@@ -210,7 +212,8 @@
   (test-case
       "sandbox kills created threads"
     (define s (new-session))
-    (define t (session-eval s '(thread (lambda () (sleep 10)))))
+    (session-eval s '(require (only-in racket [sleep rkt:sleep])))
+    (define t (session-eval s '(thread (lambda () (rkt:sleep 10)))))
     (sleep 0.1)
     (check-true (thread-dead? t)))
 
