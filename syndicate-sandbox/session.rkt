@@ -24,8 +24,6 @@
 ;; a Session is a (session ID Procedure InputPort InputPort)
 (struct session (id sandbox-eval std-output error-output) #:transparent)
 
-(define-runtime-path SESSION.RKT "./session.rkt")
-
 (define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-SANDBOX-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
@@ -40,7 +38,7 @@
                                                 call-with-killing-threads)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
-                      #:requires (list `(submod ,SESSION.RKT sandbox-init)
+                      #:requires (list '(submod syndicate-sandbox/session sandbox-init)
                                        'syndicate/drivers/timestate)
                       '(require (except-in syndicate/interactive-lang #%module-begin))
                       '(void (init-session)))))
