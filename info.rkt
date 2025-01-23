@@ -1,5 +1,5 @@
 #lang info
-(define collection "syndicate-sandbox")
+(define collection 'multi)
 (define deps '("base"
                "rackunit"
                "syndicate-classic"
