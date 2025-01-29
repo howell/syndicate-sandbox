@@ -16,7 +16,7 @@
 
 (define-logger sandbox-server)
 
-(struct active-session (session last-activity) #:transparent)
+(struct active-session (session last-activity next-seq-nos) #:transparent)
 
 (define session-envs (make-hash))
 
@@ -29,7 +29,7 @@
 
 (define (create-session id)
   (define s (new-session #:id id))
-  (hash-set! session-envs id (active-session s (current-inexact-milliseconds)))
+  (hash-set! session-envs id (active-session s (current-inexact-milliseconds) (hash 'stdout 0 'stderr 0)))
   (service-session s))
 
 (define (evaluate-code id code)
@@ -48,7 +48,7 @@
 (define (mark-activity! s)
   (hash-set! session-envs
              (session-id (active-session-session s))
-             (active-session (active-session-session s) (current-inexact-milliseconds))))
+             (struct-copy active-session s [last-activity (current-inexact-milliseconds)])))
 
 (define (handle-new-session req)
   (define msg (bytes->jsexpr (request-post-data/raw req)))
@@ -148,11 +148,22 @@
               (lambda (_p)
                 (log-sandbox-server-info "~a: Reading output from ~a for session ~a" (timestamp) type id)
                 (define out (read-string (pipe-content-length port) port))
-                (log-sandbox-server-info "~a: Sending session ~a output on ~a" (timestamp) id type)
+                (define seq-no (next-seq-no! id type))
+                (log-sandbox-server-info "~a: Sending session ~a output ~a on ~a" (timestamp) id seq-no type)
                 (define url (format "/api/sessions/~a/output" id))
-                (define msg (hash 'type (~a type) 'data out))
+                (define msg (hash 'type (~a type) 'data out 'seq_no seq-no))
                 (and (post-http! url msg)
                      (not (eof-object? out))))))
+
+(define (next-seq-no! id type)
+  (define the-session (hash-ref session-envs id))
+  (define nos (active-session-next-seq-nos the-session))
+  (define next-seq (hash-ref nos type))
+  (hash-set! session-envs
+             id
+             (struct-copy active-session the-session [next-seq-nos (hash-update nos type add1)]))
+  next-seq)
+
 
 (define (post-http! url data)
   (define conn? (http-conn-open (phx-host)
