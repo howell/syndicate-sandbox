@@ -218,7 +218,81 @@
                                           (pending 'label3 (list 'action3)))])
                  "Should only remove matching pending entry")))
 
+;; Actor Patch -> Actor
+;; Update an actor's assertions by applying the patch
+(define (update-actor-assertions act p)
+  (struct-copy actor act
+               [assertions (synd:apply-patch (actor-assertions act) p)]))
+
 ;; Dataspace ActorPath Patch -> Dataspace
-;; update the designated actor's current assertions based on the patch
+;; Update the designated actor's current assertions based on the patch
 (define (apply-patch ds who p)
-  )
+  (define act (hash-ref (dataspace-actors ds) who #f))
+  (if act
+      (struct-copy dataspace ds
+                   [actors (hash-set (dataspace-actors ds)
+                                   who
+                                   (update-actor-assertions act p))])
+      ds))
+
+(module+ test
+  (test-case "update-actor-assertions"
+    ; Test applying empty patch
+    (check-equal? (update-actor-assertions (new-actor 'test) (synd:patch trie-empty trie-empty))
+                  (new-actor 'test)
+                  "Empty patch should not modify actor")
+    
+    ; Test applying non-empty patch
+    (define test-trie (pattern->trie (tset 'test) 'value))
+    (check-equal? (update-actor-assertions 
+                   (new-actor 'test)
+                   (synd:patch test-trie trie-empty))
+                  (struct-copy actor (new-actor 'test)
+                              [assertions test-trie])
+                  "Should update assertions with patch"))
+
+  (test-case "apply-patch"
+    ; Test empty dataspace
+    (check-equal? (apply-patch (dataspace (hash) #f '()) 'actor1 (synd:patch trie-empty trie-empty))
+                  (dataspace (hash) #f '())
+                  "Empty dataspace should return unchanged")
+    
+    ; Test when actor not found
+    (check-equal? (apply-patch 
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   'actor2
+                   (synd:patch trie-empty trie-empty))
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                  "Should return unchanged when actor not found")
+    
+    ; Test applying patch to actor
+    (define test-trie (pattern->trie (tset 'test) 'value))
+    (check-equal? (apply-patch
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   'actor1
+                   (synd:patch test-trie trie-empty))
+                  (dataspace 
+                   (hash 'actor1 (struct-copy actor (new-actor 'test)
+                                            [assertions test-trie]))
+                   #f
+                   '())
+                  "Should apply patch to actor's assertions")
+    
+    ; Test with multiple actors
+    (check-equal? (apply-patch
+                   (dataspace 
+                    (hash 'actor1 (new-actor 'test1)
+                          'actor2 (new-actor 'test2)
+                          'actor3 (new-actor 'test3))
+                    #f
+                    '())
+                   'actor2
+                   (synd:patch test-trie trie-empty))
+                  (dataspace
+                   (hash 'actor1 (new-actor 'test1)
+                         'actor2 (struct-copy actor (new-actor 'test2)
+                                            [assertions test-trie])
+                         'actor3 (new-actor 'test3))
+                   #f
+                   '())
+                  "Should only modify the targeted actor")))
