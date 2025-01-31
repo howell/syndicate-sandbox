@@ -59,13 +59,11 @@
                                                                              (actor-pending-acts act))])))])])]
     [('action-interpreted (? synd:patch? p))
      (define who (spacetime-space source))
-     (define act (hash-ref (dataspace-actors ds) who))
-     (struct-copy dataspace ds
-                  [actors (hash-set (dataspace-actors ds)
-                                    who
-                                    (struct-copy actor act
-                                                 [pending-acts (remove-action (actor-pending-acts act) p source)]
-                                                 [assertions (synd:apply-patch (actor-assertions act) p)]))])]
+     (update-actor ds who
+                  (lambda (act)
+                    (struct-copy actor act
+                                [pending-acts (remove-action (actor-pending-acts act) p source)]
+                                [assertions (synd:apply-patch (actor-assertions act) p)])))]
     [('action-interpreted (synd:message body))
      #f]
     [('action-interpreted 'quit)
@@ -86,14 +84,9 @@
                [assertions (apply-patch (actor-assertions act) p)])
 
 (define (remove-action ds action source)
-  (define who (spacetime-space source))
-  (define act (hash-ref (dataspace-actors ds) who #f))
-  (if act
-      (struct-copy dataspace ds
-                   [actors (hash-set (dataspace-actors ds)
-                                     who
-                                     (remove-action/actor act action source))])
-      ds))
+  (update-actor ds 
+                (spacetime-space source)
+                (lambda (act) (remove-action/actor act action source))))
 
 (define (remove-action/actor act action label)
   (define pending-acts (actor-pending-acts act))
@@ -228,13 +221,7 @@
 ;; Dataspace ActorPath Patch -> Dataspace
 ;; Update the designated actor's current assertions based on the patch
 (define (apply-patch ds who p)
-  (define act (hash-ref (dataspace-actors ds) who #f))
-  (if act
-      (struct-copy dataspace ds
-                   [actors (hash-set (dataspace-actors ds)
-                                   who
-                                   (update-actor-assertions act p))])
-      ds))
+  (update-actor ds who (lambda (act) (update-actor-assertions act p))))
 
 (module+ test
   (test-case "update-actor-assertions"
@@ -298,7 +285,60 @@
                    '())
                   "Should only modify the targeted actor")))
 
+  (test-case "update-actor"
+    ; Test empty dataspace
+    (check-equal? (update-actor (dataspace (hash) #f '()) 
+                               'actor1
+                               (lambda (act) (struct-copy actor act [name 'new-name])))
+                  (dataspace (hash) #f '())
+                  "Empty dataspace should return unchanged")
+    
+    ; Test when actor not found
+    (check-equal? (update-actor
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   'actor2
+                   (lambda (act) (struct-copy actor act [name 'new-name])))
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                  "Should return unchanged when actor not found")
+    
+    ; Test updating single actor
+    (check-equal? (update-actor
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   'actor1
+                   (lambda (act) (struct-copy actor act [name 'new-name])))
+                  (dataspace
+                   (hash 'actor1 (struct-copy actor (new-actor 'test)
+                                            [name 'new-name]))
+                   #f
+                   '())
+                  "Should update the actor with given function")
+    
+    ; Test with multiple actors
+    (check-equal? (update-actor
+                   (dataspace
+                    (hash 'actor1 (new-actor 'test1)
+                          'actor2 (new-actor 'test2)
+                          'actor3 (new-actor 'test3))
+                    #f
+                    '())
+                   'actor2
+                   (lambda (act) (struct-copy actor act [name 'new-name])))
+                  (dataspace
+                   (hash 'actor1 (new-actor 'test1)
+                         'actor2 (struct-copy actor (new-actor 'test2)
+                                            [name 'new-name])
+                         'actor3 (new-actor 'test3))
+                   #f
+                   '())
+                  "Should only modify the targeted actor")))
+
 ;; Dataspace ActorPath {Actor -> Actor} -> Dataspace
 ;; Updates the dataspace by applying the given function to the designated actor, if present
 (define (update-actor ds who f)
-  )
+  (define act (hash-ref (dataspace-actors ds) who #f))
+  (if act
+      (struct-copy dataspace ds
+                   [actors (hash-set (dataspace-actors ds)
+                                   who
+                                   (f act))])
+      ds))
