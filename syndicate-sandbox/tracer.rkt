@@ -349,9 +349,45 @@
 ;; Dataspace Message -> Dataspace
 ;; Adds the given message to the dataspace's recent messages
 (define (enqueue-message ds m)
-  )
+  (struct-copy dataspace ds
+               [recent-messages (cons m (dataspace-recent-messages ds))]))
 
 ;; Dataspace Natural -> Dataspace
 ;; Drop all but the N most recent messages in the dataspace
 (define (limit-msgs ds n)
-  )
+  (struct-copy dataspace ds
+               [recent-messages (take (dataspace-recent-messages ds)
+                                    (min n (length (dataspace-recent-messages ds))))]))
+
+(module+ test
+  (test-case "enqueue-message"
+    ; Test empty dataspace
+    (check-equal? (enqueue-message (dataspace (hash) #f '()) 'msg1)
+                  (dataspace (hash) #f (list 'msg1))
+                  "Should add message to empty list")
+    
+    ; Test adding to existing messages
+    (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2)) 'msg3)
+                  (dataspace (hash) #f (list 'msg3 'msg1 'msg2))
+                  "Should prepend message to existing list"))
+  
+  (test-case "limit-msgs"
+    ; Test empty dataspace
+    (check-equal? (limit-msgs (dataspace (hash) #f '()) 5)
+                  (dataspace (hash) #f '())
+                  "Empty message list should remain empty")
+    
+    ; Test when under limit
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2)) 5)
+                  (dataspace (hash) #f (list 'msg1 'msg2))
+                  "Under-limit list should remain unchanged")
+    
+    ; Test when at limit
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3)) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
+                  "At-limit list should remain unchanged")
+    
+    ; Test when over limit
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5)) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
+                  "Over-limit list should be truncated")))
