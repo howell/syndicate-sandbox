@@ -217,3 +217,8 @@
                                           (pending 'label1 (list 'action1))
                                           (pending 'label3 (list 'action3)))])
                  "Should only remove matching pending entry")))
+
+;; Dataspace ActorPath Patch -> Dataspace
+;; update the designated actor's current assertions based on the patch
+(define (apply-patch ds who p)
+  )
