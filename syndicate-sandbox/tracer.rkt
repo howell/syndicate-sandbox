@@ -56,43 +56,27 @@
                                             (struct-copy actor act
                                                          [pending-acts (cons (pending sink actions)
                                                                              (actor-pending-acts act))])))])])]
-    [('action-interpreted (? patch? p))
+    [('action-interpreted (? synd:patch? p))
      (define who (spacetime-space source))
      (define act (hash-ref (dataspace-actors ds) who))
      (struct-copy dataspace ds
                   [actors (hash-set (dataspace-actors ds)
                                     who
                                     (struct-copy actor act
-                                                 [pending-acts (remove-action (actor-pending-actions act) p source)]
-                                                 [assertions (apply-patch (actor-assertions act) p)]))])]
-    [('action-interpreted (message body))
-     (write-event! source sink 'action-interpreted
-                   'message
-                   (pretty-format body))]
+                                                 [pending-acts (remove-action (actor-pending-acts act) p source)]
+                                                 [assertions (synd:apply-patch (actor-assertions act) p)]))])]
+    [('action-interpreted (synd:message body))
+     #f]
     [('action-interpreted 'quit)
-     (hash-remove! names (spacetime-space source))
-     (write-event! source sink 'quit)]
-    [('event (list cause (? patch? p)))
+     #f]
+    [('event (list cause (? synd:patch? p)))
      (match (spacetime-space sink)
        ['()
-        (write-event! source sink 'event
-                      'patch
-                      (patch->pretty-string p)
-                      cause
-                      (list (spacetime-space cause)))]
+        #f]
        [(cons _ context-path)
-        (write-event! source sink 'event
-                      'patch
-                      (format-patch '#hash() context-path p)
-                      cause
-                      (set-map (extract-patch-pids p)
-                               (lambda (local-pid) (cons local-pid context-path))))])]
-    [('event (list cause (message body)))
-     (write-event! source sink 'event
-                   'message
-                   (pretty-format body)
-                   cause
-                   (list (spacetime-space cause)))]
+        #f])]
+    [('event (list cause (synd:message body)))
+     #f]
     [('event (list _cause #f)) ;; cause will be #f
      (void)]))
 
@@ -114,26 +98,30 @@
                         pending-acts))
   (match target
     [#f
-     pending-acts]
+     act]
     [(pending _ acts)
-     (define new-acts (remove action acts))
-     (cond
-       [(empty? new-acts)
-        (remove target pending-acts)]
-       [else
-        (cons (pending label new-acts)
-              (remove target pending-acts))])]
-    [else
-     pending-acts]))
+     (define other-acts (remove action acts))
+     (define next-acts
+       (cond
+         [(empty? other-acts)
+          (remove target pending-acts)]
+         [else
+          (cons (pending label other-acts)
+                (remove target pending-acts))]))
+     (struct-copy actor act
+                  [pending-acts next-acts])]))
 
 (module+ test
+  (test-case "remove-action"
+    )
+
   ;; Test remove-action/actor
   (test-case "remove-action/actor tests"
     ; Test empty pending actions list
-    (check-equal? (remove-action/actor (new-actor 'test) 'action 'label) 
+    (check-equal? (remove-action/actor (new-actor 'test) 'action 'label)
                  (new-actor 'test)
                  "Empty list should return unchanged actor")
-    
+
     ; Test when action not found
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
@@ -143,7 +131,7 @@
                  (struct-copy actor (new-actor 'test)
                              [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
                  "Should not modify actor when label not found")
-    
+
     ; Test removing only action
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
@@ -153,7 +141,7 @@
                  (struct-copy actor (new-actor 'test)
                              [pending-acts '()])
                  "Should remove pending entry when last action removed")
-    
+
     ; Test removing one of multiple actions
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
@@ -163,7 +151,7 @@
                  (struct-copy actor (new-actor 'test)
                              [pending-acts (list (pending 'label (list 'action2)))])
                  "Should keep pending entry with remaining actions")
-    
+
     ; Test with multiple pending entries
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
