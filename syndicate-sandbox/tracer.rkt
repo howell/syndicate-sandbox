@@ -129,4 +129,52 @@
 (module+ test
   ;; Test remove-action/actor
   (test-case "remove-action/actor tests"
-    ))
+    ; Test empty pending actions list
+    (check-equal? (remove-action/actor (new-actor 'test) 'action 'label) 
+                 (new-actor 'test)
+                 "Empty list should return unchanged actor")
+    
+    ; Test when action not found
+    (check-equal? (remove-action/actor
+                   (struct-copy actor (new-actor 'test)
+                               [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
+                   'action 
+                   'label)
+                 (struct-copy actor (new-actor 'test)
+                             [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
+                 "Should not modify actor when label not found")
+    
+    ; Test removing only action
+    (check-equal? (remove-action/actor
+                   (struct-copy actor (new-actor 'test)
+                               [pending-acts (list (pending 'label (list 'action)))])
+                   'action
+                   'label)
+                 (struct-copy actor (new-actor 'test)
+                             [pending-acts '()])
+                 "Should remove pending entry when last action removed")
+    
+    ; Test removing one of multiple actions
+    (check-equal? (remove-action/actor
+                   (struct-copy actor (new-actor 'test)
+                               [pending-acts (list (pending 'label (list 'action1 'action2)))])
+                   'action1
+                   'label)
+                 (struct-copy actor (new-actor 'test)
+                             [pending-acts (list (pending 'label (list 'action2)))])
+                 "Should keep pending entry with remaining actions")
+    
+    ; Test with multiple pending entries
+    (check-equal? (remove-action/actor
+                   (struct-copy actor (new-actor 'test)
+                               [pending-acts (list 
+                                            (pending 'label1 (list 'action1))
+                                            (pending 'label2 (list 'action2))
+                                            (pending 'label3 (list 'action3)))])
+                   'action2
+                   'label2)
+                 (struct-copy actor (new-actor 'test)
+                             [pending-acts (list
+                                          (pending 'label1 (list 'action1))
+                                          (pending 'label3 (list 'action3)))])
+                 "Should only remove matching pending entry")))
