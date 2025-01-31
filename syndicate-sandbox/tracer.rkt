@@ -86,11 +86,13 @@
 
 (define (remove-action ds action source)
   (define who (spacetime-space source))
-  (define act (hash-ref (dataspace-actors ds) who))
-  (struct-copy dataspace ds
-               [actors (hash-set (dataspace-actors ds)
-                                 who
-                                 (remove-action/actor act action source))]))
+  (define act (hash-ref (dataspace-actors ds) who #f))
+  (if act
+      (struct-copy dataspace ds
+                   [actors (hash-set (dataspace-actors ds)
+                                     who
+                                     (remove-action/actor act action source))])
+      ds))
 
 (define (remove-action/actor act action label)
   (define pending-acts (actor-pending-acts act))
@@ -114,47 +116,47 @@
 (module+ test
   (test-case "remove-action"
     ; Test empty dataspace
-    (check-equal? (remove-action (dataspace (hash) #f '()) 'action 'source)
+    (check-equal? (remove-action (dataspace (hash) #f '()) 'action (spacetime 'source 123))
                   (dataspace (hash) #f '())
                   "Empty dataspace should return unchanged")
-    
+
     ; Test when actor not found
-    (check-equal? (remove-action 
+    (check-equal? (remove-action
                    (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                    'action
-                   'other-source)
+                   (spacetime 'other-source 49))
                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                   "Should return unchanged when actor not found")
-    
+
     ; Test removing action from actor
     (check-equal? (remove-action
-                   (dataspace 
-                    (hash 'actor1 
+                   (dataspace
+                    (hash 'actor1
                           (struct-copy actor (new-actor 'test)
-                                     [pending-acts (list (pending 'source (list 'action)))]))
-                    #f 
+                                     [pending-acts (list (pending (spacetime 'actor1 45) (list 'action)))]))
+                    #f
                     '())
                    'action
-                   'source)
+                   (spacetime 'actor1 45))
                   (dataspace
-                   (hash 'actor1 
+                   (hash 'actor1
                          (struct-copy actor (new-actor 'test)
                                     [pending-acts '()]))
                    #f
                    '())
                   "Should remove action from actor's pending actions")
-    
+
     ; Test with multiple actors
     (check-equal? (remove-action
-                   (dataspace 
+                   (dataspace
                     (hash 'actor1 (new-actor 'test1)
                           'actor2 (struct-copy actor (new-actor 'test2)
-                                             [pending-acts (list (pending 'source (list 'action)))])
+                                             [pending-acts (list (pending (spacetime 'actor2 71) (list 'action)))])
                           'actor3 (new-actor 'test3))
                     #f
                     '())
                    'action
-                   'source)
+                   (spacetime 'actor2 71))
                   (dataspace
                    (hash 'actor1 (new-actor 'test1)
                          'actor2 (struct-copy actor (new-actor 'test2)
@@ -175,7 +177,7 @@
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
                                [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
-                   'action 
+                   'action
                    'label)
                  (struct-copy actor (new-actor 'test)
                              [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
@@ -204,7 +206,7 @@
     ; Test with multiple pending entries
     (check-equal? (remove-action/actor
                    (struct-copy actor (new-actor 'test)
-                               [pending-acts (list 
+                               [pending-acts (list
                                             (pending 'label1 (list 'action1))
                                             (pending 'label2 (list 'action2))
                                             (pending 'label3 (list 'action3)))])
