@@ -24,7 +24,7 @@
 (define (make-tracer ch #:max-messages [max-msgs 5])
   (define curr-ds (dataspace (hash) #f '()))
   (define (receive-notification n)
-    (define next-ds (apply-notification curr-ds n))
+    (define next-ds (limit-msgs (apply-notification curr-ds n) 5))
     (set! curr-ds next-ds)
     (async-channel-put ch next-ds))
   receive-notification)
@@ -59,13 +59,12 @@
                                                                              (actor-pending-acts act))])))])])]
     [('action-interpreted (? synd:patch? p))
      (define who (spacetime-space source))
-     (update-actor ds who
-                  (lambda (act)
-                    (struct-copy actor act
-                                [pending-acts (remove-action (actor-pending-acts act) p source)]
-                                [assertions (synd:apply-patch (actor-assertions act) p)])))]
-    [('action-interpreted (synd:message body))
-     #f]
+     (update-actor ds who (lambda (act) (update-actor-assertions (remove-action/actor act p source)
+                                                                 p)))]
+    [('action-interpreted (? synd:message? m))
+     (define who (spacetime-space source))
+     (enqueue-message (update-actor ds who (lambda (act) (remove-action/actor act m source)))
+                      m)]
     [('action-interpreted 'quit)
      #f]
     [('event (list cause (? synd:patch? p)))
@@ -84,7 +83,7 @@
                [assertions (apply-patch (actor-assertions act) p)])
 
 (define (remove-action ds action source)
-  (update-actor ds 
+  (update-actor ds
                 (spacetime-space source)
                 (lambda (act) (remove-action/actor act action source))))
 
@@ -283,16 +282,30 @@
                          'actor3 (new-actor 'test3))
                    #f
                    '())
-                  "Should only modify the targeted actor")))
+                  "Should only modify the targeted actor"))
 
+  )
+
+;; Dataspace ActorPath {Actor -> Actor} -> Dataspace
+;; Updates the dataspace by applying the given function to the designated actor, if present
+(define (update-actor ds who f)
+  (define act (hash-ref (dataspace-actors ds) who #f))
+  (if act
+      (struct-copy dataspace ds
+                   [actors (hash-set (dataspace-actors ds)
+                                   who
+                                   (f act))])
+      ds))
+
+(module+ test
   (test-case "update-actor"
     ; Test empty dataspace
-    (check-equal? (update-actor (dataspace (hash) #f '()) 
+    (check-equal? (update-actor (dataspace (hash) #f '())
                                'actor1
                                (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace (hash) #f '())
                   "Empty dataspace should return unchanged")
-    
+
     ; Test when actor not found
     (check-equal? (update-actor
                    (dataspace (hash 'actor1 (new-actor 'test)) #f '())
@@ -300,7 +313,7 @@
                    (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                   "Should return unchanged when actor not found")
-    
+
     ; Test updating single actor
     (check-equal? (update-actor
                    (dataspace (hash 'actor1 (new-actor 'test)) #f '())
@@ -312,7 +325,7 @@
                    #f
                    '())
                   "Should update the actor with given function")
-    
+
     ; Test with multiple actors
     (check-equal? (update-actor
                    (dataspace
@@ -332,13 +345,13 @@
                    '())
                   "Should only modify the targeted actor")))
 
-;; Dataspace ActorPath {Actor -> Actor} -> Dataspace
-;; Updates the dataspace by applying the given function to the designated actor, if present
-(define (update-actor ds who f)
-  (define act (hash-ref (dataspace-actors ds) who #f))
-  (if act
-      (struct-copy dataspace ds
-                   [actors (hash-set (dataspace-actors ds)
-                                   who
-                                   (f act))])
-      ds))
+
+;; Dataspace Message -> Dataspace
+;; Adds the given message to the dataspace's recent messages
+(define (enqueue-message ds m)
+  )
+
+;; Dataspace Natural -> Dataspace
+;; Drop all but the N most recent messages in the dataspace
+(define (limit-msgs ds n)
+  )
