@@ -113,7 +113,56 @@
 
 (module+ test
   (test-case "remove-action"
-    )
+    ; Test empty dataspace
+    (check-equal? (remove-action (dataspace (hash) #f '()) 'action 'source)
+                  (dataspace (hash) #f '())
+                  "Empty dataspace should return unchanged")
+    
+    ; Test when actor not found
+    (check-equal? (remove-action 
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   'action
+                   'other-source)
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                  "Should return unchanged when actor not found")
+    
+    ; Test removing action from actor
+    (check-equal? (remove-action
+                   (dataspace 
+                    (hash 'actor1 
+                          (struct-copy actor (new-actor 'test)
+                                     [pending-acts (list (pending 'source (list 'action)))]))
+                    #f 
+                    '())
+                   'action
+                   'source)
+                  (dataspace
+                   (hash 'actor1 
+                         (struct-copy actor (new-actor 'test)
+                                    [pending-acts '()]))
+                   #f
+                   '())
+                  "Should remove action from actor's pending actions")
+    
+    ; Test with multiple actors
+    (check-equal? (remove-action
+                   (dataspace 
+                    (hash 'actor1 (new-actor 'test1)
+                          'actor2 (struct-copy actor (new-actor 'test2)
+                                             [pending-acts (list (pending 'source (list 'action)))])
+                          'actor3 (new-actor 'test3))
+                    #f
+                    '())
+                   'action
+                   'source)
+                  (dataspace
+                   (hash 'actor1 (new-actor 'test1)
+                         'actor2 (struct-copy actor (new-actor 'test2)
+                                            [pending-acts '()])
+                         'actor3 (new-actor 'test3))
+                   #f
+                   '())
+                  "Should only modify the targeted actor"))
 
   ;; Test remove-action/actor
   (test-case "remove-action/actor tests"
