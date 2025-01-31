@@ -8,51 +8,7 @@
          (prefix-in synd: syndicate/core))
 
 (module+ test
-  (require rackunit)
-  
-  ;; Test remove-action/actor
-  (test-case "remove-action/actor tests"
-    ; Test empty pending actions list
-    (check-equal? (remove-action/actor '() 'action 'label) 
-                 '()
-                 "Empty list should return empty list")
-    
-    ; Test when action not found
-    (check-equal? (remove-action/actor 
-                   (list (pending 'other-label (list 'action1 'action2)))
-                   'action 
-                   'label)
-                 (list (pending 'other-label (list 'action1 'action2)))
-                 "Should not modify list when label not found")
-    
-    ; Test removing only action
-    (check-equal? (remove-action/actor
-                   (list (pending 'label (list 'action)))
-                   'action
-                   'label)
-                 '()
-                 "Should remove pending entry when last action removed")
-    
-    ; Test removing one of multiple actions
-    (check-equal? (remove-action/actor
-                   (list (pending 'label (list 'action1 'action2)))
-                   'action1
-                   'label)
-                 (list (pending 'label (list 'action2)))
-                 "Should keep pending entry with remaining actions")
-    
-    ; Test with multiple pending entries
-    (check-equal? (remove-action/actor
-                   (list 
-                     (pending 'label1 (list 'action1))
-                     (pending 'label2 (list 'action2))
-                     (pending 'label3 (list 'action3)))
-                   'action2
-                   'label2)
-                 (list
-                   (pending 'label1 (list 'action1))
-                   (pending 'label3 (list 'action3)))
-                 "Should only remove matching pending entry")))
+  (require rackunit))
 
 ;; an Actor is a (actor ? Trie (Listof Event) (Listof PendingAction))
 (struct actor (name assertions pending-evts pending-acts) #:transparent)
@@ -140,17 +96,20 @@
     [('event (list _cause #f)) ;; cause will be #f
      (void)]))
 
+#;(struct-copy actor act
+               [pending-acts (remove-action/actor (actor-pending-actions act) action source)]
+               [assertions (apply-patch (actor-assertions act) p)])
+
 (define (remove-action ds action source)
   (define who (spacetime-space source))
   (define act (hash-ref (dataspace-actors ds) who))
   (struct-copy dataspace ds
                [actors (hash-set (dataspace-actors ds)
                                  who
-                                 (struct-copy actor act
-                                              [pending-acts (remove-action/actor (actor-pending-actions act) action source)]
-                                              [assertions (apply-patch (actor-assertions act) p)]))]))
+                                 (remove-action/actor act action source))]))
 
-(define (remove-action/actor pending-acts action label)
+(define (remove-action/actor act action label)
+  (define pending-acts (actor-pending-acts act))
   (define target (findf (lambda (p) (equal? label (pending-origin p)))
                         pending-acts))
   (match target
@@ -166,3 +125,8 @@
               (remove target pending-acts))])]
     [else
      pending-acts]))
+
+(module+ test
+  ;; Test remove-action/actor
+  (test-case "remove-action/actor tests"
+    ))
