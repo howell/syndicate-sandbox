@@ -8,7 +8,51 @@
          (prefix-in synd: syndicate/core))
 
 (module+ test
-  (require rackunit))
+  (require rackunit)
+  
+  ;; Test remove-action/actor
+  (test-case "remove-action/actor tests"
+    ; Test empty pending actions list
+    (check-equal? (remove-action/actor '() 'action 'label) 
+                 '()
+                 "Empty list should return empty list")
+    
+    ; Test when action not found
+    (check-equal? (remove-action/actor 
+                   (list (pending 'other-label (list 'action1 'action2)))
+                   'action 
+                   'label)
+                 (list (pending 'other-label (list 'action1 'action2)))
+                 "Should not modify list when label not found")
+    
+    ; Test removing only action
+    (check-equal? (remove-action/actor
+                   (list (pending 'label (list 'action)))
+                   'action
+                   'label)
+                 '()
+                 "Should remove pending entry when last action removed")
+    
+    ; Test removing one of multiple actions
+    (check-equal? (remove-action/actor
+                   (list (pending 'label (list 'action1 'action2)))
+                   'action1
+                   'label)
+                 (list (pending 'label (list 'action2)))
+                 "Should keep pending entry with remaining actions")
+    
+    ; Test with multiple pending entries
+    (check-equal? (remove-action/actor
+                   (list 
+                     (pending 'label1 (list 'action1))
+                     (pending 'label2 (list 'action2))
+                     (pending 'label3 (list 'action3)))
+                   'action2
+                   'label2)
+                 (list
+                   (pending 'label1 (list 'action1))
+                   (pending 'label3 (list 'action3)))
+                 "Should only remove matching pending entry")))
 
 ;; an Actor is a (actor ? Trie (Listof Event) (Listof PendingAction))
 (struct actor (name assertions pending-evts pending-acts) #:transparent)
