@@ -8,7 +8,8 @@
          (prefix-in synd: syndicate/core))
 
 (module+ test
-  (require rackunit))
+  (require rackunit)
+  (require syndicate/tset))
 
 ;; an Actor is a (actor ? Trie (Listof Event) (Listof PendingAction))
 (struct actor (name assertions pending-evts pending-acts) #:transparent)
@@ -241,10 +242,10 @@
     (check-equal? (update-actor-assertions (new-actor 'test) (synd:patch trie-empty trie-empty))
                   (new-actor 'test)
                   "Empty patch should not modify actor")
-    
+
     ; Test applying non-empty patch
-    (define test-trie (pattern->trie (tset 'test) 'value))
-    (check-equal? (update-actor-assertions 
+    (define test-trie (pattern->trie (datum-tset 'test) 'value))
+    (check-equal? (update-actor-assertions
                    (new-actor 'test)
                    (synd:patch test-trie trie-empty))
                   (struct-copy actor (new-actor 'test)
@@ -256,31 +257,31 @@
     (check-equal? (apply-patch (dataspace (hash) #f '()) 'actor1 (synd:patch trie-empty trie-empty))
                   (dataspace (hash) #f '())
                   "Empty dataspace should return unchanged")
-    
+
     ; Test when actor not found
-    (check-equal? (apply-patch 
+    (check-equal? (apply-patch
                    (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                    'actor2
                    (synd:patch trie-empty trie-empty))
                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                   "Should return unchanged when actor not found")
-    
+
     ; Test applying patch to actor
-    (define test-trie (pattern->trie (tset 'test) 'value))
+    (define test-trie (pattern->trie (datum-tset 'test) 'value))
     (check-equal? (apply-patch
                    (dataspace (hash 'actor1 (new-actor 'test)) #f '())
                    'actor1
                    (synd:patch test-trie trie-empty))
-                  (dataspace 
+                  (dataspace
                    (hash 'actor1 (struct-copy actor (new-actor 'test)
                                             [assertions test-trie]))
                    #f
                    '())
                   "Should apply patch to actor's assertions")
-    
+
     ; Test with multiple actors
     (check-equal? (apply-patch
-                   (dataspace 
+                   (dataspace
                     (hash 'actor1 (new-actor 'test1)
                           'actor2 (new-actor 'test2)
                           'actor3 (new-actor 'test3))
@@ -296,3 +297,8 @@
                    #f
                    '())
                   "Should only modify the targeted actor")))
+
+;; Dataspace ActorPath {Actor -> Actor} -> Dataspace
+;; Updates the dataspace by applying the given function to the designated actor, if present
+(define (update-actor ds who f)
+  )
