@@ -11,18 +11,18 @@
   (require rackunit)
   (require syndicate/tset))
 
-;; an Actor is a (actor ? Trie (Listof Event) (Listof PendingAction))
-(struct actor (name assertions pending-evts pending-acts) #:transparent)
-(define (new-actor name) (actor name trie-empty '() '()))
+;; an Actor is a (actor Name Trie (Listof Event))
+(struct actor (name assertions pending-evts) #:transparent)
+(define (new-actor name) (actor name trie-empty '()))
 
-;; a PendingAction is a (pending SpaceTime (Listof Action))
-(struct pending (origin acts) #:transparent)
+;; a PendingAction is a (pending ActorPath SpaceTime (Listof Action))
+(struct pending (actor origin acts) #:transparent)
 
-;; a Dataspace is a (dataspace (Hashof ActorPath Actor) (Optionof ActorPath) (Listof Any))
-(struct dataspace (actors active-actor recent-messages) #:transparent)
+;; a Dataspace is a (dataspace (Hashof ActorPath Actor) (Optionof ActorPath) (Listof Any) (Listof PendingAction))
+(struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
 
 (define (make-tracer ch #:max-messages [max-msgs 5])
-  (define curr-ds (dataspace (hash) #f '()))
+  (define curr-ds (dataspace (hash) #f '() '()))
   (define (receive-notification n)
     (define next-ds (limit-msgs (apply-notification curr-ds n) 5))
     (set! curr-ds next-ds)
@@ -50,16 +50,11 @@
        [else
         (define origin (spacetime-space sink))
         (struct-copy dataspace ds
-                     [actors (hash-update (dataspace-actors ds)
-                                          origin
-                                          (lambda (act)
-                                            (struct-copy actor act
-                                                         [pending-acts (cons (pending sink actions)
-                                                                             (actor-pending-acts act))])))])])]
+                    [pending-acts (cons (pending origin sink actions)
+                                      (dataspace-pending-acts ds))])])]
     [('action-interpreted (? synd:patch? p))
      (define who (spacetime-space source))
-     (update-actor ds who (lambda (act) (update-actor-assertions (remove-action/actor act p source)
-                                                                 p)))]
+     (update-actor-assertions (remove-action/actor ds who p source) who p)]
     [('action-interpreted (? synd:message? m))
      (define who (spacetime-space source))
      (enqueue-message (update-actor ds who (lambda (act) (remove-action/actor act m source)))
@@ -78,27 +73,25 @@
      (void)]))
 
 (define (remove-action ds action source)
-  (update-actor ds
-                (spacetime-space source)
-                (lambda (act) (remove-action/actor act action source))))
+  (remove-action/actor ds (spacetime-space source) action source))
 
-(define (remove-action/actor act action label)
-  (define pending-acts (actor-pending-acts act))
-  (define target (findf (lambda (p) (equal? label (pending-origin p)))
-                        pending-acts))
+(define (remove-action/actor ds actor-path action label)
+  (define target (findf (lambda (p) 
+                         (and (equal? actor-path (pending-actor p))
+                              (equal? label (pending-origin p))))
+                       (dataspace-pending-acts ds)))
   (match target
-    [#f
-     act]
-    [(pending _ acts)
+    [#f ds]
+    [(pending _ _ acts)
      (define other-acts (remove action acts))
      (define next-acts
        (cond
          [(empty? other-acts)
-          (remove target pending-acts)]
+          (remove target (dataspace-pending-acts ds))]
          [else
-          (cons (pending label other-acts)
-                (remove target pending-acts))]))
-     (struct-copy actor act
+          (cons (pending actor-path label other-acts)
+                (remove target (dataspace-pending-acts ds)))]))
+     (struct-copy dataspace ds
                   [pending-acts next-acts])]))
 
 (module+ test
