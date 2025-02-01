@@ -42,8 +42,7 @@
      (struct-copy dataspace ds
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
     [('exit exn-or-false)
-     (struct-copy dataspace ds
-                  [actors (hash-remove (dataspace-actors ds) (spacetime-space sink))])]
+     (remove-actor ds (spacetime-space sink))]
     [('actions-produced actions)
      (cond
        [(null? actions)
@@ -66,8 +65,8 @@
      (enqueue-message (update-actor ds who (lambda (act) (remove-action/actor act m source)))
                       m)]
     [('action-interpreted 'quit)
-     #f]
-    [('event (list cause (? synd:patch? p)))
+     (remove-actor ds (spacetime-space source))]
+    [('event (list cause evt))
      (match (spacetime-space sink)
        ['()
         #f]
@@ -77,10 +76,6 @@
      #f]
     [('event (list _cause #f)) ;; cause will be #f
      (void)]))
-
-#;(struct-copy actor act
-               [pending-acts (remove-action/actor (actor-pending-actions act) action source)]
-               [assertions (apply-patch (actor-assertions act) p)])
 
 (define (remove-action ds action source)
   (update-actor ds
@@ -365,29 +360,34 @@
     (check-equal? (enqueue-message (dataspace (hash) #f '()) 'msg1)
                   (dataspace (hash) #f (list 'msg1))
                   "Should add message to empty list")
-    
+
     ; Test adding to existing messages
     (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2)) 'msg3)
                   (dataspace (hash) #f (list 'msg3 'msg1 'msg2))
                   "Should prepend message to existing list"))
-  
+
   (test-case "limit-msgs"
     ; Test empty dataspace
     (check-equal? (limit-msgs (dataspace (hash) #f '()) 5)
                   (dataspace (hash) #f '())
                   "Empty message list should remain empty")
-    
+
     ; Test when under limit
     (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2)) 5)
                   (dataspace (hash) #f (list 'msg1 'msg2))
                   "Under-limit list should remain unchanged")
-    
+
     ; Test when at limit
     (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3)) 3)
                   (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
                   "At-limit list should remain unchanged")
-    
+
     ; Test when over limit
     (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5)) 3)
                   (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
                   "Over-limit list should be truncated")))
+
+;; Dataspace ActorPath -> Dataspace
+(define (remove-actor ds who)
+  (struct-copy dataspace ds
+               [actors (hash-remove (dataspace-actors ds) who)]))
