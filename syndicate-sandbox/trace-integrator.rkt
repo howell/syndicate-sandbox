@@ -4,6 +4,8 @@
 
 (require syndicate/trace
          syndicate/trie
+         syndicate/tset
+         syndicate/patch
          racket/async-channel
          (prefix-in synd: syndicate/core))
 
@@ -52,11 +54,12 @@
         ds]
        [else
         (struct-copy dataspace ds
-                    [pending-acts (cons (pending sink actions)
-                                      (dataspace-pending-acts ds))])])]
+                     [pending-acts (cons (pending sink (label-actions actions))
+                                         (dataspace-pending-acts ds))])])]
     [('action-interpreted (? synd:patch? p))
+     (define p* (patch-relabel p (const DEFAULT-LABEL)))
      (define who (spacetime-space source))
-     (update-actor-assertions (remove-action ds p source) who p)]
+     (apply-patch (remove-action ds p* source) who p*)]
     [('action-interpreted (? synd:message? m))
      (enqueue-message (remove-action ds m source) m)]
     [('action-interpreted 'quit)
@@ -67,6 +70,15 @@
      (define who (spacetime-space sink))
      (struct-copy dataspace ds
                   [active-actor (list who evt)])]))
+
+;; (Listof Action) -> (Listof Action)
+;; Relabel the leaves of every patch to simplify equality checking
+(define DEFAULT-LABEL (datum-tset #t))
+(define (label-actions actions)
+  (for/list ([a (in-list actions)])
+    (if (patch? a)
+        (patch-relabel a (const DEFAULT-LABEL))
+        a)))
 
 ;; Dataspace Action SpaceTime -> Dataspace
 (define (remove-action ds action source)
