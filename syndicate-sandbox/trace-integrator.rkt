@@ -1,6 +1,7 @@
 #lang racket
 
-(provide make-trace-integrator)
+(provide make-trace-integrator
+         current-trace-channel)
 
 (require syndicate/trace
          syndicate/trie
@@ -27,10 +28,12 @@
 ;;            (Listof PendingAction))
 (struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
 
-(define (make-trace-integrator ch #:max-messages [max-msgs 5])
+(define current-trace-channel (make-parameter (make-async-channel)))
+
+(define (make-trace-integrator [ch (current-trace-channel)] #:max-messages [max-msgs 5])
   (define curr-ds (dataspace (hash) #f '() '()))
   (define (receive-notification n)
-    (define next-ds (limit-msgs (apply-notification curr-ds n) 5))
+    (define next-ds (limit-msgs (apply-notification curr-ds n) max-msgs))
     (set! curr-ds next-ds)
     (async-channel-put ch next-ds))
   receive-notification)
@@ -392,3 +395,11 @@
                                               'action-interpreted
                                               the-action))
                   (struct-copy dataspace the-ds [pending-acts '()]))))
+
+;; Dataspace -> JSExpr
+(define (dataspace->json ds)
+  #f)
+
+;; Actor -> JSExpr
+(define (actor->json act)
+  #f)
