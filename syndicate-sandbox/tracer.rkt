@@ -18,7 +18,11 @@
 ;; a PendingAction is a (pending SpaceTime (Listof Action))
 (struct pending (origin acts) #:transparent)
 
-;; a Dataspace is a (dataspace (Hashof ActorPath Actor) (Optionof ActorPath) (Listof Any) (Listof PendingAction))
+;; a Dataspace is a
+;; (dataspace (Hashof ActorPath Actor)
+;;            (Optionof (List ActorPath Event))
+;;            (Listof Any)
+;;            (Listof PendingAction))
 (struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
 
 (define (make-tracer ch #:max-messages [max-msgs 5])
@@ -33,8 +37,7 @@
   (match-define (trace-notification source sink type detail) n)
   (match* (type detail)
     [('turn-begin _process)
-     (struct-copy dataspace ds
-                  [active-actor sink])]
+     ds]
     [('turn-end _process)
      (struct-copy dataspace ds
                   [active-actor #f])]
@@ -58,16 +61,12 @@
      (enqueue-message (remove-action ds m source) m)]
     [('action-interpreted 'quit)
      (remove-actor (remove-action ds 'quit source) (spacetime-space source))]
-    [('event (list cause evt))
-     (match (spacetime-space sink)
-       ['()
-        #f]
-       [(cons _ context-path)
-        #f])]
-    [('event (list cause (synd:message body)))
-     #f]
-    [('event (list _cause #f)) ;; cause will be #f
-     (void)]))
+    [('event (list _cause #f))
+     ds]
+    [('event (list _cause evt))
+     (define who (spacetime-space sink))
+     (struct-copy dataspace ds
+                  [active-actor (list who evt)])]))
 
 ;; Dataspace Action SpaceTime -> Dataspace
 (define (remove-action ds action source)
