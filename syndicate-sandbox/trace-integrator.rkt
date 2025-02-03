@@ -398,8 +398,69 @@
 
 ;; Dataspace -> JSExpr
 (define (dataspace->json ds)
-  #f)
+  (hash 'actors (for/hash ([(k v) (in-hash (dataspace-actors ds))])
+                  (values (~a k) (actor->json v)))
+        'active_actor (match (dataspace-active-actor ds)
+                       [#f #f]
+                       [(list who evt) (hash 'actor (~a who)
+                                           'event evt)])
+        'recent_messages (dataspace-recent-messages ds)
+        'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
+                          (hash 'origin (spacetime->json (pending-origin p))
+                                'actions (pending-acts p)))))
 
 ;; Actor -> JSExpr
 (define (actor->json act)
-  #f)
+  (hash 'name (actor-name act)
+        'assertions (trie->jsexpr (actor-assertions act) 
+                                 (λ (v) (tset->list v))
+                                 #:serialize-atom ~a)
+        'pending_events (actor-pending-evts act)))
+
+;; SpaceTime -> JSExpr
+(define (spacetime->json st)
+  (match st
+    [#f #f]
+    [(spacetime space time)
+     (hash 'space (~a space)
+           'time time)]))
+
+(module+ test
+  (test-case "dataspace->json"
+    (define ds (dataspace (hash) #f '() '()))
+    (check-equal? (dataspace->json ds)
+                  (hash 'actors (hash)
+                        'active_actor #f
+                        'recent_messages '()
+                        'pending_actions '()))
+    
+    (define ds2 (dataspace (hash '(1) (new-actor 'test))
+                          (list '(1) 'test-evt)
+                          (list 'msg1)
+                          (list (pending (spacetime '(1) 123)
+                                       (list 'act1)))))
+    (check-equal? (dataspace->json ds2)
+                  (hash 'actors (hash "(1)" (hash 'name 'test
+                                                'assertions trie-empty
+                                                'pending_events '()))
+                        'active_actor (hash 'actor "(1)"
+                                          'event 'test-evt)
+                        'recent_messages (list 'msg1)
+                        'pending_actions (list (hash 'origin (hash 'space "(1)"
+                                                                 'time 123)
+                                                   'actions (list 'act1))))))
+
+  (test-case "actor->json"
+    (define act (new-actor 'test))
+    (check-equal? (actor->json act)
+                  (hash 'name 'test
+                        'assertions trie-empty
+                        'pending_events '()))
+    
+    (define act2 (struct-copy actor act
+                             [assertions (pattern->trie (datum-tset 'test) 'value)]
+                             [pending-evts (list 'evt1)]))
+    (check-match (actor->json act2)
+                 (hash-table ['name 'test]
+                            ['assertions (? jsexpr?)]
+                            ['pending_events (list 'evt1)]))))
