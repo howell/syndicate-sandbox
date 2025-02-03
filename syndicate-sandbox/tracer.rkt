@@ -15,8 +15,8 @@
 (struct actor (name assertions pending-evts) #:transparent)
 (define (new-actor name) (actor name trie-empty '()))
 
-;; a PendingAction is a (pending ActorPath SpaceTime (Listof Action))
-(struct pending (actor origin acts) #:transparent)
+;; a PendingAction is a (pending SpaceTime (Listof Action))
+(struct pending (origin acts) #:transparent)
 
 ;; a Dataspace is a (dataspace (Hashof ActorPath Actor) (Optionof ActorPath) (Listof Any) (Listof PendingAction))
 (struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
@@ -48,19 +48,16 @@
        [(null? actions)
         ds]
        [else
-        (define origin (spacetime-space sink))
         (struct-copy dataspace ds
-                    [pending-acts (cons (pending origin sink actions)
+                    [pending-acts (cons (pending sink actions)
                                       (dataspace-pending-acts ds))])])]
     [('action-interpreted (? synd:patch? p))
      (define who (spacetime-space source))
-     (update-actor-assertions (remove-action/actor ds who p source) who p)]
+     (update-actor-assertions (remove-action ds p source) who p)]
     [('action-interpreted (? synd:message? m))
-     (define who (spacetime-space source))
-     (enqueue-message (update-actor ds who (lambda (act) (remove-action/actor act m source)))
-                      m)]
+     (enqueue-message (remove-action ds m source) m)]
     [('action-interpreted 'quit)
-     (remove-actor ds (spacetime-space source))]
+     (remove-actor (remove-action ds 'quit source) (spacetime-space source))]
     [('event (list cause evt))
      (match (spacetime-space sink)
        ['()
@@ -72,24 +69,20 @@
     [('event (list _cause #f)) ;; cause will be #f
      (void)]))
 
+;; Dataspace Action SpaceTime -> Dataspace
 (define (remove-action ds action source)
-  (remove-action/actor ds (spacetime-space source) action source))
-
-(define (remove-action/actor ds actor-path action label)
-  (define target (findf (lambda (p) 
-                         (and (equal? actor-path (pending-actor p))
-                              (equal? label (pending-origin p))))
-                       (dataspace-pending-acts ds)))
+  (define target (findf (lambda (act) (equal? source (pending-origin act)))
+                        (dataspace-pending-acts ds)))
   (match target
     [#f ds]
-    [(pending _ _ acts)
+    [(pending _ acts)
      (define other-acts (remove action acts))
      (define next-acts
        (cond
          [(empty? other-acts)
           (remove target (dataspace-pending-acts ds))]
          [else
-          (cons (pending actor-path label other-acts)
+          (cons (pending source other-acts)
                 (remove target (dataspace-pending-acts ds)))]))
      (struct-copy dataspace ds
                   [pending-acts next-acts])]))
@@ -97,107 +90,59 @@
 (module+ test
   (test-case "remove-action"
     ; Test empty dataspace
-    (check-equal? (remove-action (dataspace (hash) #f '()) 'action (spacetime 'source 123))
-                  (dataspace (hash) #f '())
+    (check-equal? (remove-action (dataspace (hash) #f '() '()) 'action (spacetime 'source 123))
+                  (dataspace (hash) #f '() '())
                   "Empty dataspace should return unchanged")
 
-    ; Test when actor not found
+    ; Test when action not found
     (check-equal? (remove-action
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                    'action
                    (spacetime 'other-source 49))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
-                  "Should return unchanged when actor not found")
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                  "Should return unchanged when action not found")
 
-    ; Test removing action from actor
+    ; Test removing action
     (check-equal? (remove-action
                    (dataspace
-                    (hash 'actor1
-                          (struct-copy actor (new-actor 'test)
-                                     [pending-acts (list (pending (spacetime 'actor1 45) (list 'action)))]))
+                    (hash 'actor1 (new-actor 'test))
                     #f
-                    '())
+                    '()
+                    (list (pending (spacetime 'actor1 45) (list 'action))))
                    'action
                    (spacetime 'actor1 45))
                   (dataspace
-                   (hash 'actor1
-                         (struct-copy actor (new-actor 'test)
-                                    [pending-acts '()]))
+                   (hash 'actor1 (new-actor 'test))
                    #f
+                   '()
                    '())
                   "Should remove action from actor's pending actions")
 
-    ; Test with multiple actors
+    ; Test with multiple actions/actors
     (check-equal? (remove-action
                    (dataspace
                     (hash 'actor1 (new-actor 'test1)
-                          'actor2 (struct-copy actor (new-actor 'test2)
-                                             [pending-acts (list (pending (spacetime 'actor2 71) (list 'action)))])
+                          'actor2 (new-actor 'test2)
                           'actor3 (new-actor 'test3))
                     #f
-                    '())
-                   'action
-                   (spacetime 'actor2 71))
+                    '()
+                    (list
+                     (pending (spacetime 'actor1 12) (list 'action1))
+                     (pending (spacetime 'actor2 18) (list 'abc 'action2 'def))
+                     (pending (spacetime 'actor3 43) (list 'action3))))
+                   'action2
+                   (spacetime 'actor2 18))
                   (dataspace
                    (hash 'actor1 (new-actor 'test1)
-                         'actor2 (struct-copy actor (new-actor 'test2)
-                                            [pending-acts '()])
+                         'actor2 (new-actor 'test2)
                          'actor3 (new-actor 'test3))
                    #f
-                   '())
-                  "Should only modify the targeted actor"))
-
-  ;; Test remove-action/actor
-  (test-case "remove-action/actor tests"
-    ; Test empty pending actions list
-    (check-equal? (remove-action/actor (new-actor 'test) 'action 'label)
-                 (new-actor 'test)
-                 "Empty list should return unchanged actor")
-
-    ; Test when action not found
-    (check-equal? (remove-action/actor
-                   (struct-copy actor (new-actor 'test)
-                               [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
-                   'action
-                   'label)
-                 (struct-copy actor (new-actor 'test)
-                             [pending-acts (list (pending 'other-label (list 'action1 'action2)))])
-                 "Should not modify actor when label not found")
-
-    ; Test removing only action
-    (check-equal? (remove-action/actor
-                   (struct-copy actor (new-actor 'test)
-                               [pending-acts (list (pending 'label (list 'action)))])
-                   'action
-                   'label)
-                 (struct-copy actor (new-actor 'test)
-                             [pending-acts '()])
-                 "Should remove pending entry when last action removed")
-
-    ; Test removing one of multiple actions
-    (check-equal? (remove-action/actor
-                   (struct-copy actor (new-actor 'test)
-                               [pending-acts (list (pending 'label (list 'action1 'action2)))])
-                   'action1
-                   'label)
-                 (struct-copy actor (new-actor 'test)
-                             [pending-acts (list (pending 'label (list 'action2)))])
-                 "Should keep pending entry with remaining actions")
-
-    ; Test with multiple pending entries
-    (check-equal? (remove-action/actor
-                   (struct-copy actor (new-actor 'test)
-                               [pending-acts (list
-                                            (pending 'label1 (list 'action1))
-                                            (pending 'label2 (list 'action2))
-                                            (pending 'label3 (list 'action3)))])
-                   'action2
-                   'label2)
-                 (struct-copy actor (new-actor 'test)
-                             [pending-acts (list
-                                          (pending 'label1 (list 'action1))
-                                          (pending 'label3 (list 'action3)))])
-                 "Should only remove matching pending entry")))
+                   '()
+                   (list
+                    (pending (spacetime 'actor2 18) (list 'abc 'def))
+                    (pending (spacetime 'actor1 12) (list 'action1))
+                    (pending (spacetime 'actor3 43) (list 'action3))))
+                  "Should only modify the targeted list of actions")))
 
 ;; Actor Patch -> Actor
 ;; Update an actor's assertions by applying the patch
@@ -228,28 +173,29 @@
 
   (test-case "apply-patch"
     ; Test empty dataspace
-    (check-equal? (apply-patch (dataspace (hash) #f '()) 'actor1 (synd:patch trie-empty trie-empty))
-                  (dataspace (hash) #f '())
+    (check-equal? (apply-patch (dataspace (hash) #f '() '()) 'actor1 (synd:patch trie-empty trie-empty))
+                  (dataspace (hash) #f '() '())
                   "Empty dataspace should return unchanged")
 
     ; Test when actor not found
     (check-equal? (apply-patch
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                    'actor2
                    (synd:patch trie-empty trie-empty))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                   "Should return unchanged when actor not found")
 
     ; Test applying patch to actor
     (define test-trie (pattern->trie (datum-tset 'test) 'value))
     (check-equal? (apply-patch
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                    'actor1
                    (synd:patch test-trie trie-empty))
                   (dataspace
                    (hash 'actor1 (struct-copy actor (new-actor 'test)
                                             [assertions test-trie]))
                    #f
+                   '()
                    '())
                   "Should apply patch to actor's assertions")
 
@@ -260,6 +206,7 @@
                           'actor2 (new-actor 'test2)
                           'actor3 (new-actor 'test3))
                     #f
+                    '()
                     '())
                    'actor2
                    (synd:patch test-trie trie-empty))
@@ -269,6 +216,7 @@
                                             [assertions test-trie])
                          'actor3 (new-actor 'test3))
                    #f
+                   '()
                    '())
                   "Should only modify the targeted actor"))
 
@@ -288,29 +236,30 @@
 (module+ test
   (test-case "update-actor"
     ; Test empty dataspace
-    (check-equal? (update-actor (dataspace (hash) #f '())
+    (check-equal? (update-actor (dataspace (hash) #f '() '())
                                'actor1
                                (lambda (act) (struct-copy actor act [name 'new-name])))
-                  (dataspace (hash) #f '())
+                  (dataspace (hash) #f '() '())
                   "Empty dataspace should return unchanged")
 
     ; Test when actor not found
     (check-equal? (update-actor
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                    'actor2
                    (lambda (act) (struct-copy actor act [name 'new-name])))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                   "Should return unchanged when actor not found")
 
     ; Test updating single actor
     (check-equal? (update-actor
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
                    'actor1
                    (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace
                    (hash 'actor1 (struct-copy actor (new-actor 'test)
                                             [name 'new-name]))
                    #f
+                   '()
                    '())
                   "Should update the actor with given function")
 
@@ -321,6 +270,7 @@
                           'actor2 (new-actor 'test2)
                           'actor3 (new-actor 'test3))
                     #f
+                    '()
                     '())
                    'actor2
                    (lambda (act) (struct-copy actor act [name 'new-name])))
@@ -330,6 +280,7 @@
                                             [name 'new-name])
                          'actor3 (new-actor 'test3))
                    #f
+                   '()
                    '())
                   "Should only modify the targeted actor")))
 
@@ -350,34 +301,34 @@
 (module+ test
   (test-case "enqueue-message"
     ; Test empty dataspace
-    (check-equal? (enqueue-message (dataspace (hash) #f '()) 'msg1)
-                  (dataspace (hash) #f (list 'msg1))
+    (check-equal? (enqueue-message (dataspace (hash) #f '() '()) 'msg1)
+                  (dataspace (hash) #f (list 'msg1) '())
                   "Should add message to empty list")
 
     ; Test adding to existing messages
-    (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2)) 'msg3)
-                  (dataspace (hash) #f (list 'msg3 'msg1 'msg2))
+    (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2) '()) 'msg3)
+                  (dataspace (hash) #f (list 'msg3 'msg1 'msg2) '())
                   "Should prepend message to existing list"))
 
   (test-case "limit-msgs"
     ; Test empty dataspace
-    (check-equal? (limit-msgs (dataspace (hash) #f '()) 5)
-                  (dataspace (hash) #f '())
+    (check-equal? (limit-msgs (dataspace (hash) #f '() '()) 5)
+                  (dataspace (hash) #f '() '())
                   "Empty message list should remain empty")
 
     ; Test when under limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2)) 5)
-                  (dataspace (hash) #f (list 'msg1 'msg2))
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2) '()) 5)
+                  (dataspace (hash) #f (list 'msg1 'msg2) '())
                   "Under-limit list should remain unchanged")
 
     ; Test when at limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3)) 3)
-                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '()) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '())
                   "At-limit list should remain unchanged")
 
     ; Test when over limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5)) 3)
-                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3))
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5) '()) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '())
                   "Over-limit list should be truncated")))
 
 ;; Dataspace ActorPath -> Dataspace
