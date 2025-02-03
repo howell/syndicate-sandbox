@@ -334,3 +334,49 @@
 (define (remove-actor ds who)
   (struct-copy dataspace ds
                [actors (hash-remove (dataspace-actors ds) who)]))
+
+(module+ test
+  (require syndicate/store
+           syndicate/ground)
+
+  (define (run/record boot-acts)
+    (define evts/rev '())
+    (define (record-evt! evt) (set! evts/rev (cons evt evts/rev)))
+    (with-store [(current-trace-procedures (cons record-evt! (current-trace-procedures)))]
+      (run-ground boot-acts))
+    (reverse evts/rev))
+
+  (require (only-in (submod syndicate/examples/actor/bank-account syndicate-main) activate!))
+  (define bank-account-trace (parameterize ([current-output-port (open-output-nowhere)])
+                               (run/record (activate!))))
+
+  (test-case "consumes a real trace"
+    (check-not-exn (lambda () (for/fold ([ds (dataspace (hash) #f '() '())])
+                                        ([evt (in-list bank-account-trace)])
+                                (apply-notification ds evt)))))
+
+  (test-case "final state reflects program execution"
+    (define final-ds (for/fold ([ds (dataspace (hash) #f '() '())])
+                               ([evt (in-list bank-account-trace)])
+                       (apply-notification ds evt)))
+    (check-equal? (hash-count (dataspace-actors final-ds))
+                              2)
+    (check-false (dataspace-active-actor final-ds))
+    (check-equal? (length (dataspace-recent-messages final-ds))
+                  2)
+    (check-true (empty? (dataspace-pending-acts final-ds))))
+
+  (test-case "removing actions regression"
+    (define the-action (patch (trie '#s(account 0) DEFAULT-LABEL
+                                    '#s(observe (deposity 'any)) DEFAULT-LABEL)
+                              trie-empty))
+    (define the-ds (dataspace (hash)
+                              #f
+                              '()
+                              (list (pending '#s(spacetime (0) 2) (list the-action)))))
+    (check-equal? (apply-notification the-ds (trace-notification
+                                              '#s(spacetime (0) 2)
+                                              '#s(spacetime () 21)
+                                              'action-interpreted
+                                              the-action))
+                  (struct-copy dataspace the-ds [pending-acts '()]))))
