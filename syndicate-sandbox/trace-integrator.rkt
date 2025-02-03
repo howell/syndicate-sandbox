@@ -1,6 +1,6 @@
 #lang racket
 
-(provide make-tracer)
+(provide make-trace-integrator)
 
 (require syndicate/trace
          syndicate/trie
@@ -25,7 +25,7 @@
 ;;            (Listof PendingAction))
 (struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
 
-(define (make-tracer ch #:max-messages [max-msgs 5])
+(define (make-trace-integrator ch #:max-messages [max-msgs 5])
   (define curr-ds (dataspace (hash) #f '() '()))
   (define (receive-notification n)
     (define next-ds (limit-msgs (apply-notification curr-ds n) 5))
