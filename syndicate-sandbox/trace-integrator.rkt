@@ -1,22 +1,25 @@
 #lang racket
 
 (provide make-trace-integrator
-         current-trace-channel)
+         current-trace-channel
+         dataspace->json
+         actor->json)
 
 (require syndicate/trace
          syndicate/trie
          syndicate/tset
          syndicate/patch
+         (prefix-in synd: syndicate/core)
          racket/async-channel
-         (prefix-in synd: syndicate/core))
+         json)
 
 (module+ test
   (require rackunit)
   (require syndicate/tset))
 
 ;; an Actor is a (actor Name Trie (Listof Event))
-(struct actor (name assertions pending-evts) #:transparent)
-(define (new-actor name) (actor name trie-empty '()))
+(struct actor (name assertions) #:transparent)
+(define (new-actor name) (actor name trie-empty))
 
 ;; a PendingAction is a (pending SpaceTime (Listof Action))
 (struct pending (origin acts) #:transparent)
@@ -401,21 +404,34 @@
   (hash 'actors (for/hash ([(k v) (in-hash (dataspace-actors ds))])
                   (values (~a k) (actor->json v)))
         'active_actor (match (dataspace-active-actor ds)
-                       [#f #f]
-                       [(list who evt) (hash 'actor (~a who)
-                                           'event evt)])
+                        [#f #f]
+                        [(list who evt) (hash 'actor (~a who)
+                                              'event evt)])
         'recent_messages (dataspace-recent-messages ds)
         'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
-                          (hash 'origin (spacetime->json (pending-origin p))
-                                'actions (pending-acts p)))))
+                           (hash 'origin (spacetime->json (pending-origin p))
+                                 'actions (map action->json (pending-acts p))))))
 
 ;; Actor -> JSExpr
 (define (actor->json act)
   (hash 'name (actor-name act)
-        'assertions (trie->jsexpr (actor-assertions act) 
-                                 (λ (v) (tset->list v))
-                                 #:serialize-atom ~a)
-        'pending_events (actor-pending-evts act)))
+        'assertions (trie->json (actor-assertions act))))
+
+;; Action -> JSExpr
+(define (action->json a)
+  (if (patch? a)
+      (patch->json a)
+      a))
+
+;; Patch -> JSExpr
+(define (patch->json p)
+  (patch (trie->json (patch-added p))
+         (trie->json (patch-removed p))))
+
+;; Trie -> JSExpr
+(define (trie->json t)
+  (match-define (list (list* _ added) _) (trie->patterns t))
+  (map ~v added))
 
 ;; SpaceTime -> JSExpr
 (define (spacetime->json st)
@@ -433,34 +449,30 @@
                         'active_actor #f
                         'recent_messages '()
                         'pending_actions '()))
-    
+
     (define ds2 (dataspace (hash '(1) (new-actor 'test))
-                          (list '(1) 'test-evt)
-                          (list 'msg1)
-                          (list (pending (spacetime '(1) 123)
-                                       (list 'act1)))))
+                           (list '(1) 'test-evt)
+                           (list 'msg1)
+                           (list (pending (spacetime '(1) 123)
+                                          (list 'act1)))))
     (check-equal? (dataspace->json ds2)
                   (hash 'actors (hash "(1)" (hash 'name 'test
-                                                'assertions trie-empty
-                                                'pending_events '()))
+                                                  'assertions '()))
                         'active_actor (hash 'actor "(1)"
-                                          'event 'test-evt)
+                                            'event 'test-evt)
                         'recent_messages (list 'msg1)
                         'pending_actions (list (hash 'origin (hash 'space "(1)"
-                                                                 'time 123)
-                                                   'actions (list 'act1))))))
+                                                                   'time 123)
+                                                     'actions (list 'act1))))))
 
   (test-case "actor->json"
     (define act (new-actor 'test))
     (check-equal? (actor->json act)
                   (hash 'name 'test
-                        'assertions trie-empty
-                        'pending_events '()))
-    
+                        'assertions '()))
+
     (define act2 (struct-copy actor act
-                             [assertions (pattern->trie (datum-tset 'test) 'value)]
-                             [pending-evts (list 'evt1)]))
+                              [assertions (pattern->trie (datum-tset 'test) 'value)]))
     (check-match (actor->json act2)
                  (hash-table ['name 'test]
-                            ['assertions (? jsexpr?)]
-                            ['pending_events (list 'evt1)]))))
+                             ['assertions '("'value")]))))
