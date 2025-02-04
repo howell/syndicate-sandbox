@@ -10,8 +10,9 @@
          flush-session
          session-memory-usage)
 
-(require racket/sandbox
-         racket/runtime-path)
+(require "trace-integrator.rkt"
+         racket/sandbox
+         racket/async-channel)
 
 (module+ test
   (require rackunit))
@@ -21,36 +22,42 @@
 (define DEFAULT-INTERACTION-MEMORY-LIMIT-MB 4)
 (define DEFAULT-INTERACTION-TIME-LIMIT-S 1)
 
-;; a Session is a (session ID Procedure InputPort InputPort)
-(struct session (id sandbox-eval std-output error-output) #:transparent)
+;; a Session is a (session ID Procedure InputPort InputPort AsyncChannel)
+(struct session (id sandbox-eval std-output error-output trace-chan) #:transparent)
 
 (define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-SANDBOX-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
+  (define trace-chan (make-async-channel))
   (define evaluator
-    (parameterize ([sandbox-output std-out]
+    (parameterize ([current-trace-channel trace-chan]
+                   [sandbox-output std-out]
                    [sandbox-error-output err-out]
                    [sandbox-memory-limit memory-limit]
                    [sandbox-eval-limits (list DEFAULT-INTERACTION-TIME-LIMIT-S
                                               DEFAULT-INTERACTION-MEMORY-LIMIT-MB)]
                    [sandbox-eval-handlers (list #f
                                                 call-with-killing-threads)]
+                   [sandbox-namespace-specs (list sandbox-make-namespace
+                                                  'syndicate-sandbox/trace-integrator)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list '(submod syndicate-sandbox/session sandbox-init)
                                        'syndicate/drivers/timestate)
                       '(require (except-in syndicate/interactive-lang #%module-begin))
                       '(void (init-session)))))
-  (session id evaluator std-in err-in))
+  (session id evaluator std-in err-in trace-chan))
 
 (module sandbox-init racket/base
   (provide init-session)
 
   (require syndicate/drivers/repl
            (only-in syndicate run-ground)
+           (only-in syndicate/store with-store)
+           (only-in syndicate/trace current-trace-procedures)
            racket/async-channel
-           racket/logging)
+           "trace-integrator.rkt")
   (define (init-session)
     (let ([ready-chan (make-async-channel)])
       (thread (lambda ()
@@ -64,7 +71,9 @@
                                       (displayln (vector-ref v 1) (current-error-port)))))
                   (loop))))
       (async-channel-get ready-chan)
-      (thread (lambda () (run-ground (boot-repl #:when-ready ready-chan))))
+      (thread (lambda ()
+                (with-store ([current-trace-procedures (cons (make-trace-integrator) (current-trace-procedures))])
+                  (run-ground (boot-repl #:when-ready ready-chan)))))
       (async-channel-get ready-chan)
       (repl-activate syndicate/drivers/timestate))))
 

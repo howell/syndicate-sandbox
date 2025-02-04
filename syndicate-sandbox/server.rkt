@@ -5,6 +5,7 @@
          phx-port)
 
 (require "session.rkt"
+         "trace-integrator.rkt"
          racket/date
          net/url
          json
@@ -29,7 +30,11 @@
 
 (define (create-session id)
   (define s (new-session #:id id))
-  (hash-set! session-envs id (active-session s (current-inexact-milliseconds) (hash 'stdout 0 'stderr 0)))
+  (hash-set! session-envs id (active-session s
+                                             (current-inexact-milliseconds)
+                                             (hash 'stdout 0
+                                                   'stderr 0
+                                                   TRACE-TYPE 0)))
   (service-session s))
 
 (define (evaluate-code id code)
@@ -137,9 +142,10 @@
    (lambda ()
      (define stdout-evt (push-output id (session-std-output s) 'stdout))
      (define stderr-evt (push-output id (session-error-output s) 'stderr))
+     (define trace-evt (push-trace-evt id (session-trace-chan s)))
      (let loop ()
        (define timeout-evt (wait-for id))
-       (when (sync stdout-evt stderr-evt timeout-evt)
+       (when (sync stdout-evt stderr-evt trace-evt timeout-evt)
          (loop)))
      (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) id))))
 
@@ -154,6 +160,17 @@
                 (define msg (hash 'type (~a type) 'data out 'seq_no seq-no))
                 (and (post-http! url msg)
                      (not (eof-object? out))))))
+
+(define TRACE-TYPE 'trace)
+(define (push-trace-evt id trace-chan)
+  (handle-evt trace-chan
+              (lambda (evt)
+                (define seq-no (next-seq-no! id TRACE-TYPE))
+                (when (< seq-no 3)
+                  (log-sandbox-server-info "~a: Sending session ~a trace step ~a" (timestamp) id seq-no)
+                  (define url (format "/api/sessions/~a/output" id))
+                  (define msg (hash 'type (~a TRACE-TYPE) 'data (dataspace->json evt) 'seq_no seq-no))
+                  (post-http! url msg)))))
 
 (define (next-seq-no! id type)
   (define the-session (hash-ref session-envs id))
