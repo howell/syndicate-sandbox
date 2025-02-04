@@ -185,7 +185,7 @@
                    (new-actor 'test)
                    (synd:patch test-trie trie-empty))
                   (struct-copy actor (new-actor 'test)
-                              [assertions test-trie])
+                               [assertions test-trie])
                   "Should update assertions with patch"))
 
   (test-case "apply-patch"
@@ -210,7 +210,7 @@
                    (synd:patch test-trie trie-empty))
                   (dataspace
                    (hash 'actor1 (struct-copy actor (new-actor 'test)
-                                            [assertions test-trie]))
+                                              [assertions test-trie]))
                    #f
                    '()
                    '())
@@ -230,7 +230,7 @@
                   (dataspace
                    (hash 'actor1 (new-actor 'test1)
                          'actor2 (struct-copy actor (new-actor 'test2)
-                                            [assertions test-trie])
+                                              [assertions test-trie])
                          'actor3 (new-actor 'test3))
                    #f
                    '()
@@ -246,16 +246,16 @@
   (if act
       (struct-copy dataspace ds
                    [actors (hash-set (dataspace-actors ds)
-                                   who
-                                   (f act))])
+                                     who
+                                     (f act))])
       ds))
 
 (module+ test
   (test-case "update-actor"
     ; Test empty dataspace
     (check-equal? (update-actor (dataspace (hash) #f '() '())
-                               'actor1
-                               (lambda (act) (struct-copy actor act [name 'new-name])))
+                                'actor1
+                                (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace (hash) #f '() '())
                   "Empty dataspace should return unchanged")
 
@@ -274,7 +274,7 @@
                    (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace
                    (hash 'actor1 (struct-copy actor (new-actor 'test)
-                                            [name 'new-name]))
+                                              [name 'new-name]))
                    #f
                    '()
                    '())
@@ -294,7 +294,7 @@
                   (dataspace
                    (hash 'actor1 (new-actor 'test1)
                          'actor2 (struct-copy actor (new-actor 'test2)
-                                            [name 'new-name])
+                                              [name 'new-name])
                          'actor3 (new-actor 'test3))
                    #f
                    '()
@@ -313,7 +313,7 @@
 (define (limit-msgs ds n)
   (struct-copy dataspace ds
                [recent-messages (take (dataspace-recent-messages ds)
-                                    (min n (length (dataspace-recent-messages ds))))]))
+                                      (min n (length (dataspace-recent-messages ds))))]))
 
 (module+ test
   (test-case "enqueue-message"
@@ -378,7 +378,7 @@
                                ([evt (in-list bank-account-trace)])
                        (apply-notification ds evt)))
     (check-equal? (hash-count (dataspace-actors final-ds))
-                              2)
+                  2)
     (check-false (dataspace-active-actor final-ds))
     (check-equal? (length (dataspace-recent-messages final-ds))
                   2)
@@ -401,32 +401,38 @@
 
 ;; Dataspace -> JSExpr
 (define (dataspace->json ds)
-  (hash 'actors (for/hash ([(k v) (in-hash (dataspace-actors ds))])
-                  (values (~a k) (actor->json v)))
+  (hash 'actors (for/list ([(k v) (in-hash (dataspace-actors ds))])
+                  (hash-set (actor->json v) 'id (~a k)))
         'active_actor (match (dataspace-active-actor ds)
                         [#f #f]
                         [(list who evt) (hash 'actor (~a who)
-                                              'event evt)])
-        'recent_messages (dataspace-recent-messages ds)
+                                              'event (action->json evt))])
+        'recent_messages (map action->json (dataspace-recent-messages ds))
         'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
                            (hash 'origin (spacetime->json (pending-origin p))
                                  'actions (map action->json (pending-acts p))))))
 
 ;; Actor -> JSExpr
 (define (actor->json act)
-  (hash 'name (actor-name act)
+  (hash 'name (~a (actor-name act))
         'assertions (trie->json (actor-assertions act))))
 
 ;; Action -> JSExpr
 (define (action->json a)
-  (if (patch? a)
-      (patch->json a)
-      a))
+  (cond
+    [(patch? a)
+     (patch->json a)]
+    [(synd:actor? a)
+     (list "spawn" (trie->json (synd:actor-initial-assertions a)))]
+    [(synd:message? a)
+     (list "message" (~v a))]
+    [else
+     (~v a)]))
 
 ;; Patch -> JSExpr
 (define (patch->json p)
-  (patch (trie->json (patch-added p))
-         (trie->json (patch-removed p))))
+  (hash 'added (trie->json (patch-added p))
+        'removed (trie->json (patch-removed p))))
 
 ;; Trie -> JSExpr
 (define (trie->json t)
@@ -445,7 +451,7 @@
   (test-case "dataspace->json"
     (define ds (dataspace (hash) #f '() '()))
     (check-equal? (dataspace->json ds)
-                  (hash 'actors (hash)
+                  (hash 'actors '()
                         'active_actor #f
                         'recent_messages '()
                         'pending_actions '()))
@@ -456,23 +462,32 @@
                            (list (pending (spacetime '(1) 123)
                                           (list 'act1)))))
     (check-equal? (dataspace->json ds2)
-                  (hash 'actors (hash "(1)" (hash 'name 'test
-                                                  'assertions '()))
+                  (hash 'actors (list (hash 'id "(1)"
+                                            'name "test"
+                                            'assertions '()))
                         'active_actor (hash 'actor "(1)"
-                                            'event 'test-evt)
-                        'recent_messages (list 'msg1)
+                                            'event "'test-evt")
+                        'recent_messages (list "'msg1")
                         'pending_actions (list (hash 'origin (hash 'space "(1)"
                                                                    'time 123)
-                                                     'actions (list 'act1))))))
+                                                     'actions (list "'act1"))))))
 
   (test-case "actor->json"
     (define act (new-actor 'test))
     (check-equal? (actor->json act)
-                  (hash 'name 'test
+                  (hash 'name "test"
                         'assertions '()))
 
     (define act2 (struct-copy actor act
                               [assertions (pattern->trie (datum-tset 'test) 'value)]))
     (check-match (actor->json act2)
-                 (hash-table ['name 'test]
-                             ['assertions '("'value")]))))
+                 (hash-table ['name "test"]
+                             ['assertions '("'value")])))
+
+  (test-case "real trace elements produces legal json"
+    (void (for/fold ([ds (dataspace (hash) #f '() '())])
+                    ([evt (in-list bank-account-trace)])
+            (define v (dataspace->json ds))
+            (check-not-exn (lambda () (jsexpr->string v)) (~a v))
+            #;(check-true (jsexpr? v) (~a v))
+            (apply-notification ds evt)))))
