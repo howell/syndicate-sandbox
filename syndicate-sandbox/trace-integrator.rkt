@@ -53,7 +53,7 @@
      (struct-copy dataspace ds
                   [active-actor #f])]
     [('spawn (synd:process name _beh _state))
-     (struct-copy dataspace ds
+     (struct-copy dataspace (remove-action ds synd:actor? source)
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
     [('exit exn-or-false)
      (remove-actor ds (spacetime-space sink))]
@@ -99,14 +99,17 @@
         (patch-relabel a (const DEFAULT-LABEL))
         a)))
 
-;; Dataspace Action SpaceTime -> Dataspace
+;; Dataspace (U Action {Action -> Bool} SpaceTime -> Dataspace
 (define (remove-action ds action source)
   (define target (findf (lambda (act) (equal? source (pending-origin act)))
                         (dataspace-pending-acts ds)))
   (match target
     [#f ds]
     [(pending _ acts)
-     (define other-acts (remove action acts))
+     (define finder (if (procedure? action)
+                        (lambda (_ other) (action other))
+                        (lambda (_ other) (equal? other action))))
+     (define other-acts (remove action acts finder))
      (define next-acts
        (cond
          [(empty? other-acts)
@@ -391,19 +394,20 @@
       (run-ground boot-acts))
     (reverse evts/rev))
 
+  (define (consume-trace t)
+    (for/fold ([ds (dataspace (hash) #f '() '() #f)])
+              ([evt (in-list t)])
+      (apply-notification ds evt)))
+
   (require (only-in (submod syndicate/examples/actor/bank-account syndicate-main) activate!))
   (define bank-account-trace (parameterize ([current-output-port (open-output-nowhere)])
                                (run/record (activate!))))
 
   (test-case "consumes a real trace"
-    (check-not-exn (lambda () (for/fold ([ds (dataspace (hash) #f '() '() #f)])
-                                        ([evt (in-list bank-account-trace)])
-                                (apply-notification ds evt)))))
+    (check-not-exn (lambda () (consume-trace bank-account-trace))))
 
   (test-case "final state reflects program execution"
-    (define final-ds (for/fold ([ds (dataspace (hash) #f '() '() #f)])
-                               ([evt (in-list bank-account-trace)])
-                       (apply-notification ds evt)))
+    (define final-ds (consume-trace bank-account-trace))
     (check-equal? (hash-count (dataspace-actors final-ds))
                   2)
     (check-false (dataspace-active-actor final-ds))
@@ -525,4 +529,16 @@
             (define v (dataspace->json ds))
             (check-not-exn (lambda () (jsexpr->string v)) (~a v))
             #;(check-true (jsexpr? v) (~a v))
-            (apply-notification ds evt)))))
+            (apply-notification ds evt))))
+
+  (test-case "regression: failing to properly remove actions"
+    (local-require syndicate/drivers/repl
+                   (only-in (submod syndicate/drivers/repl syndicate-main) activate!))
+    (define repl-trace (parameterize ([current-output-port (open-output-nowhere)])
+                         (thread (lambda ()
+                                   (sleep 1/4)
+                                   (do-quit)))
+                         (run/record (activate!))))
+    (define final-ds (consume-trace repl-trace))
+    (check-match (dataspace-pending-acts final-ds)
+                 (list (pending _ (list (? synd:quit-dataspace?)))))))
