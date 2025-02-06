@@ -28,13 +28,14 @@
 ;; (dataspace (Hashof ActorPath Actor)
 ;;            (Optionof (List ActorPath Event))
 ;;            (Listof Any)
-;;            (Listof PendingAction))
-(struct dataspace (actors active-actor recent-messages pending-acts) #:transparent)
+;;            (Listof PendingAction)
+;;            (Optionof Symbol))
+(struct dataspace (actors active-actor recent-messages pending-acts last-op) #:transparent)
 
 (define current-trace-channel (make-parameter (make-async-channel)))
 
 (define (make-trace-integrator [ch (current-trace-channel)] #:max-messages [max-msgs 5])
-  (define curr-ds (dataspace (hash) #f '() '()))
+  (define curr-ds (dataspace (hash) #f '() '() #f))
   (define (receive-notification n)
     (define next-ds (limit-msgs (apply-notification curr-ds n) max-msgs))
     (unless (eq? next-ds curr-ds)
@@ -42,8 +43,9 @@
       (async-channel-put ch next-ds)))
   receive-notification)
 
-(define (apply-notification ds n)
+(define (apply-notification ds/pre n)
   (match-define (trace-notification source sink type detail) n)
+  (define ds (mark-last-op ds/pre type))
   (match* (type detail)
     [('turn-begin _process)
      ds]
@@ -78,6 +80,16 @@
      (struct-copy dataspace ds
                   [active-actor (list who evt)])]))
 
+(define (mark-last-op ds type)
+  (define label (match type
+                  ['turn-begin 'begin-turn]
+                  ['turn-end 'end-turn]
+                  ['spawn 'spawn-actor]
+                  ['exit 'actor-exit]
+                  ['event 'dispatch-event]
+                  [_ type]))
+  (struct-copy dataspace ds [last-op label]))
+
 ;; (Listof Action) -> (Listof Action)
 ;; Relabel the leaves of every patch to simplify equality checking
 (define DEFAULT-LABEL (datum-tset #t))
@@ -108,16 +120,16 @@
 (module+ test
   (test-case "remove-action"
     ; Test empty dataspace
-    (check-equal? (remove-action (dataspace (hash) #f '() '()) 'action (spacetime 'source 123))
-                  (dataspace (hash) #f '() '())
+    (check-equal? (remove-action (dataspace (hash) #f '() '() #f) 'action (spacetime 'source 123))
+                  (dataspace (hash) #f '() '() #f)
                   "Empty dataspace should return unchanged")
 
     ; Test when action not found
     (check-equal? (remove-action
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                    'action
                    (spacetime 'other-source 49))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                   "Should return unchanged when action not found")
 
     ; Test removing action
@@ -126,14 +138,16 @@
                     (hash 'actor1 (new-actor 'test))
                     #f
                     '()
-                    (list (pending (spacetime 'actor1 45) (list 'action))))
+                    (list (pending (spacetime 'actor1 45) (list 'action)))
+                    'op)
                    'action
                    (spacetime 'actor1 45))
                   (dataspace
                    (hash 'actor1 (new-actor 'test))
                    #f
                    '()
-                   '())
+                   '()
+                   'op)
                   "Should remove action from actor's pending actions")
 
     ; Test with multiple actions/actors
@@ -147,7 +161,8 @@
                     (list
                      (pending (spacetime 'actor1 12) (list 'action1))
                      (pending (spacetime 'actor2 18) (list 'abc 'action2 'def))
-                     (pending (spacetime 'actor3 43) (list 'action3))))
+                     (pending (spacetime 'actor3 43) (list 'action3)))
+                    'op)
                    'action2
                    (spacetime 'actor2 18))
                   (dataspace
@@ -159,7 +174,8 @@
                    (list
                     (pending (spacetime 'actor2 18) (list 'abc 'def))
                     (pending (spacetime 'actor1 12) (list 'action1))
-                    (pending (spacetime 'actor3 43) (list 'action3))))
+                    (pending (spacetime 'actor3 43) (list 'action3)))
+                   'op)
                   "Should only modify the targeted list of actions")))
 
 ;; Actor Patch -> Actor
@@ -191,22 +207,22 @@
 
   (test-case "apply-patch"
     ; Test empty dataspace
-    (check-equal? (apply-patch (dataspace (hash) #f '() '()) 'actor1 (synd:patch trie-empty trie-empty))
-                  (dataspace (hash) #f '() '())
+    (check-equal? (apply-patch (dataspace (hash) #f '() '() 'op) 'actor1 (synd:patch trie-empty trie-empty))
+                  (dataspace (hash) #f '() '() 'op)
                   "Empty dataspace should return unchanged")
 
     ; Test when actor not found
     (check-equal? (apply-patch
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                    'actor2
                    (synd:patch trie-empty trie-empty))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                   "Should return unchanged when actor not found")
 
     ; Test applying patch to actor
     (define test-trie (pattern->trie (datum-tset 'test) 'value))
     (check-equal? (apply-patch
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                    'actor1
                    (synd:patch test-trie trie-empty))
                   (dataspace
@@ -214,7 +230,8 @@
                                               [assertions test-trie]))
                    #f
                    '()
-                   '())
+                   '()
+                   'op)
                   "Should apply patch to actor's assertions")
 
     ; Test with multiple actors
@@ -225,7 +242,8 @@
                           'actor3 (new-actor 'test3))
                     #f
                     '()
-                    '())
+                    '()
+                    'op)
                    'actor2
                    (synd:patch test-trie trie-empty))
                   (dataspace
@@ -235,7 +253,8 @@
                          'actor3 (new-actor 'test3))
                    #f
                    '()
-                   '())
+                   '()
+                   'op)
                   "Should only modify the targeted actor"))
 
   )
@@ -254,23 +273,23 @@
 (module+ test
   (test-case "update-actor"
     ; Test empty dataspace
-    (check-equal? (update-actor (dataspace (hash) #f '() '())
+    (check-equal? (update-actor (dataspace (hash) #f '() '() 'op)
                                 'actor1
                                 (lambda (act) (struct-copy actor act [name 'new-name])))
-                  (dataspace (hash) #f '() '())
+                  (dataspace (hash) #f '() '() 'op)
                   "Empty dataspace should return unchanged")
 
     ; Test when actor not found
     (check-equal? (update-actor
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                    'actor2
                    (lambda (act) (struct-copy actor act [name 'new-name])))
-                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                  (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                   "Should return unchanged when actor not found")
 
     ; Test updating single actor
     (check-equal? (update-actor
-                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '())
+                   (dataspace (hash 'actor1 (new-actor 'test)) #f '() '() 'op)
                    'actor1
                    (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace
@@ -278,7 +297,8 @@
                                               [name 'new-name]))
                    #f
                    '()
-                   '())
+                   '()
+                   'op)
                   "Should update the actor with given function")
 
     ; Test with multiple actors
@@ -289,7 +309,8 @@
                           'actor3 (new-actor 'test3))
                     #f
                     '()
-                    '())
+                    '()
+                    'op)
                    'actor2
                    (lambda (act) (struct-copy actor act [name 'new-name])))
                   (dataspace
@@ -299,7 +320,8 @@
                          'actor3 (new-actor 'test3))
                    #f
                    '()
-                   '())
+                   '()
+                   'op)
                   "Should only modify the targeted actor")))
 
 
@@ -323,34 +345,34 @@
 (module+ test
   (test-case "enqueue-message"
     ; Test empty dataspace
-    (check-equal? (enqueue-message (dataspace (hash) #f '() '()) 'msg1)
-                  (dataspace (hash) #f (list 'msg1) '())
+    (check-equal? (enqueue-message (dataspace (hash) #f '() '() 'op) 'msg1)
+                  (dataspace (hash) #f (list 'msg1) '() 'op)
                   "Should add message to empty list")
 
     ; Test adding to existing messages
-    (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2) '()) 'msg3)
-                  (dataspace (hash) #f (list 'msg3 'msg1 'msg2) '())
+    (check-equal? (enqueue-message (dataspace (hash) #f (list 'msg1 'msg2) '() 'op) 'msg3)
+                  (dataspace (hash) #f (list 'msg3 'msg1 'msg2) '() 'op)
                   "Should prepend message to existing list"))
 
   (test-case "limit-msgs"
     ; Test empty dataspace
-    (check-equal? (limit-msgs (dataspace (hash) #f '() '()) 5)
-                  (dataspace (hash) #f '() '())
+    (check-equal? (limit-msgs (dataspace (hash) #f '() '() 'op) 5)
+                  (dataspace (hash) #f '() '() 'op)
                   "Empty message list should remain empty")
 
     ; Test when under limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2) '()) 5)
-                  (dataspace (hash) #f (list 'msg1 'msg2) '())
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2) '() 'op) 5)
+                  (dataspace (hash) #f (list 'msg1 'msg2) '() 'op)
                   "Under-limit list should remain unchanged")
 
     ; Test when at limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '()) 3)
-                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '())
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '() 'op) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '() 'op)
                   "At-limit list should remain unchanged")
 
     ; Test when over limit
-    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5) '()) 3)
-                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '())
+    (check-equal? (limit-msgs (dataspace (hash) #f (list 'msg1 'msg2 'msg3 'msg4 'msg5) '() 'op) 3)
+                  (dataspace (hash) #f (list 'msg1 'msg2 'msg3) '() 'op)
                   "Over-limit list should be truncated")))
 
 ;; Dataspace ActorPath -> Dataspace
@@ -374,12 +396,12 @@
                                (run/record (activate!))))
 
   (test-case "consumes a real trace"
-    (check-not-exn (lambda () (for/fold ([ds (dataspace (hash) #f '() '())])
+    (check-not-exn (lambda () (for/fold ([ds (dataspace (hash) #f '() '() #f)])
                                         ([evt (in-list bank-account-trace)])
                                 (apply-notification ds evt)))))
 
   (test-case "final state reflects program execution"
-    (define final-ds (for/fold ([ds (dataspace (hash) #f '() '())])
+    (define final-ds (for/fold ([ds (dataspace (hash) #f '() '() #f)])
                                ([evt (in-list bank-account-trace)])
                        (apply-notification ds evt)))
     (check-equal? (hash-count (dataspace-actors final-ds))
@@ -396,13 +418,17 @@
     (define the-ds (dataspace (hash)
                               #f
                               '()
-                              (list (pending '#s(spacetime (0) 2) (list the-action)))))
+                              (list (pending '#s(spacetime (0) 2) (list the-action)))
+                              'op))
     (check-equal? (apply-notification the-ds (trace-notification
                                               '#s(spacetime (0) 2)
                                               '#s(spacetime () 21)
                                               'action-interpreted
                                               the-action))
-                  (struct-copy dataspace the-ds [pending-acts '()]))))
+                  (struct-copy dataspace the-ds
+                               [pending-acts '()]
+                               [last-op 'action-interpreted]
+                               ))))
 
 ;; Dataspace -> JSExpr
 (define (dataspace->json ds)
@@ -415,7 +441,8 @@
         'recent_messages (map action->json (dataspace-recent-messages ds))
         'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
                            (hash 'origin (spacetime->json (pending-origin p))
-                                 'actions (map action->json (pending-acts p))))))
+                                 'actions (map action->json (pending-acts p))))
+        'last_op (and (dataspace-last-op ds) (~a (dataspace-last-op ds)))))
 
 ;; Actor -> JSExpr
 (define (actor->json act)
@@ -454,18 +481,20 @@
 
 (module+ test
   (test-case "dataspace->json"
-    (define ds (dataspace (hash) #f '() '()))
+    (define ds (dataspace (hash) #f '() '() #f))
     (check-equal? (dataspace->json ds)
                   (hash 'actors '()
                         'active_actor #f
                         'recent_messages '()
-                        'pending_actions '()))
+                        'pending_actions '()
+                        'last_op #f))
 
     (define ds2 (dataspace (hash '(1) (new-actor 'test))
                            (list '(1) 'test-evt)
                            (list 'msg1)
                            (list (pending (spacetime '(1) 123)
-                                          (list 'act1)))))
+                                          (list 'act1)))
+                           'action-interpreted))
     (check-equal? (dataspace->json ds2)
                   (hash 'actors (list (hash 'id "(1)"
                                             'name "test"
@@ -473,6 +502,7 @@
                         'active_actor (hash 'actor "(1)"
                                             'event "'test-evt")
                         'recent_messages (list "'msg1")
+                        'last_op "action-interpreted"
                         'pending_actions (list (hash 'origin (hash 'space "(1)"
                                                                    'time 123)
                                                      'actions (list "'act1"))))))
@@ -490,7 +520,7 @@
                              ['assertions '("'value")])))
 
   (test-case "real trace elements produces legal json"
-    (void (for/fold ([ds (dataspace (hash) #f '() '())])
+    (void (for/fold ([ds (dataspace (hash) #f '() '() #f)])
                     ([evt (in-list bank-account-trace)])
             (define v (dataspace->json ds))
             (check-not-exn (lambda () (jsexpr->string v)) (~a v))
