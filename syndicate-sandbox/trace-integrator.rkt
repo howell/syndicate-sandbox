@@ -37,8 +37,9 @@
   (define curr-ds (dataspace (hash) #f '() '()))
   (define (receive-notification n)
     (define next-ds (limit-msgs (apply-notification curr-ds n) max-msgs))
-    (set! curr-ds next-ds)
-    (async-channel-put ch next-ds))
+    (unless (eq? next-ds curr-ds)
+      (set! curr-ds next-ds)
+      (async-channel-put ch next-ds)))
   receive-notification)
 
 (define (apply-notification ds n)
@@ -311,9 +312,13 @@
 ;; Dataspace Natural -> Dataspace
 ;; Drop all but the N most recent messages in the dataspace
 (define (limit-msgs ds n)
-  (struct-copy dataspace ds
-               [recent-messages (take (dataspace-recent-messages ds)
-                                      (min n (length (dataspace-recent-messages ds))))]))
+  (cond
+    [(< n (length (dataspace-recent-messages ds)))
+     (struct-copy dataspace ds
+                  [recent-messages (take (dataspace-recent-messages ds)
+                                         n)])]
+    [else
+     ds]))
 
 (module+ test
   (test-case "enqueue-message"
