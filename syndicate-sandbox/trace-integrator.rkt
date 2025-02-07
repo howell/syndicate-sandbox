@@ -24,13 +24,16 @@
 ;; a PendingAction is a (pending SpaceTime (Listof Action))
 (struct pending (origin acts) #:transparent)
 
+;; an ActiveActor is a (active-actor ActorPath Event (Optionof (Listof Action)))
+(struct active-actor (who evt acts) #:transparent)
+
 ;; a Dataspace is a
 ;; (dataspace (Hashof ActorPath Actor)
-;;            (Optionof (List ActorPath Event))
+;;            (Optionof (List ActorPath Event (Optionof (Listof Action))))
 ;;            (Listof Any)
 ;;            (Listof PendingAction)
 ;;            (Optionof Symbol))
-(struct dataspace (actors active-actor recent-messages pending-acts last-op) #:transparent)
+(struct dataspace (actors active recent-messages pending-acts last-op) #:transparent)
 
 (define current-trace-channel (make-parameter (make-async-channel)))
 
@@ -51,7 +54,7 @@
      ds]
     [('turn-end _process)
      (struct-copy dataspace ds
-                  [active-actor #f])]
+                  [active #f])]
     [('spawn (synd:process name _beh _state))
      (struct-copy dataspace (remove-action ds synd:actor? source)
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
@@ -78,7 +81,7 @@
     [('event (list _cause evt))
      (define who (spacetime-space sink))
      (struct-copy dataspace ds
-                  [active-actor (list who evt)])]))
+                  [active (list who evt)])]))
 
 (define (mark-last-op ds type)
   (define label (match type
@@ -410,7 +413,7 @@
     (define final-ds (consume-trace bank-account-trace))
     (check-equal? (hash-count (dataspace-actors final-ds))
                   2)
-    (check-false (dataspace-active-actor final-ds))
+    (check-false (dataspace-active final-ds))
     (check-equal? (length (dataspace-recent-messages final-ds))
                   2)
     (check-true (empty? (dataspace-pending-acts final-ds))))
@@ -438,7 +441,7 @@
 (define (dataspace->json ds)
   (hash 'actors (for/list ([(k v) (in-hash (dataspace-actors ds))])
                   (hash-set (actor->json v) 'id (~a k)))
-        'active_actor (match (dataspace-active-actor ds)
+        'active_actor (match (dataspace-active ds)
                         [#f #f]
                         [(list who evt) (hash 'actor (~a who)
                                               'event (action->json evt))])
