@@ -51,41 +51,36 @@
   (define ds (mark-last-op ds/pre type))
   (match* (type detail)
     [('turn-begin _process)
-     (match (dataspace-active ds)
-       [(list who evt _) (struct-copy dataspace ds
-                                     [active (list who evt #f)])]
-       [_ ds])]
+     ds]
     [('turn-end _process)
-     (struct-copy dataspace ds
-                  [active #f]
-                  [pending-acts (if (dataspace-active ds)
-                                  (cons (pending (spacetime-space (first (dataspace-active ds))) '())
-                                       (dataspace-pending-acts ds))
-                                  (dataspace-pending-acts ds))])]
+     ds]
     [('spawn (synd:process name _beh _state))
-     (struct-copy dataspace (remove-action ds synd:actor? source)
+     (struct-copy dataspace (remove-action (deactivate-active ds) synd:actor? source)
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
     [('exit exn-or-false)
-     (remove-actor ds (spacetime-space sink))]
+     ds]
     [('actions-produced actions)
      (match (dataspace-active ds)
        [(list who evt _)
         (define labeled-actions (label-actions actions))
+        (define next-pending (if (null? actions)
+                                 (dataspace-pending-acts ds)
+                                 (cons (pending sink labeled-actions)
+                                       (dataspace-pending-acts ds))))
         (struct-copy dataspace ds
                      [active (list who evt labeled-actions)]
-                     [pending-acts (cons (pending sink labeled-actions)
-                                       (dataspace-pending-acts ds))])]
+                     [pending-acts next-pending])]
        [_ ds])]
     [('action-interpreted (? synd:patch? p))
      (define p* (patch-relabel p (const DEFAULT-LABEL)))
      (define who (spacetime-space source))
-     (apply-patch (remove-action ds p* source) who p*)]
+     (apply-patch (remove-action (deactivate-active ds) p* source) who p*)]
     [('action-interpreted (? synd:message? m))
-     (enqueue-message (remove-action ds m source) m)]
+     (enqueue-message (remove-action (deactivate-active ds) m source) m)]
     [('action-interpreted 'quit)
-     (remove-actor (remove-action ds 'quit source) (spacetime-space source))]
+     (remove-actor (remove-action (deactivate-active ds) 'quit source) (spacetime-space source))]
     [('event (list _cause #f))
-     ds]
+     (deactivate-active ds)]
     [('event (list _cause evt))
      (define who (spacetime-space sink))
      (struct-copy dataspace ds
@@ -100,6 +95,14 @@
                   ['event 'dispatch-event]
                   [_ type]))
   (struct-copy dataspace ds [last-op label]))
+
+(define (deactivate-active ds)
+  (cond
+    [(list? (dataspace-active ds))
+     (struct-copy dataspace ds
+                  [active #f])]
+    [else
+     ds]))
 
 ;; (Listof Action) -> (Listof Action)
 ;; Relabel the leaves of every patch to simplify equality checking
@@ -452,8 +455,8 @@
         'active_actor (match (dataspace-active ds)
                         [#f #f]
                         [(list who evt acts) (hash 'actor (~a who)
-                                                 'event (action->json evt)
-                                                 'actions (and acts (map action->json acts)))])
+                                                   'event (action->json evt)
+                                                   'actions (and acts (map action->json acts)))])
         'recent_messages (map action->json (dataspace-recent-messages ds))
         'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
                            (hash 'origin (spacetime->json (pending-origin p))
