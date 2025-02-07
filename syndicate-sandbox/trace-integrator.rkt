@@ -24,8 +24,8 @@
 ;; a PendingAction is a (pending SpaceTime (Listof Action))
 (struct pending (origin acts) #:transparent)
 
-;; an ActiveActor is a (active-actor ActorPath Event (Optionof (Listof Action)))
-(struct active-actor (who evt acts) #:transparent)
+;; an ActiveActor is a (List ActorPath Event (Option (Listof Action)))
+;; represents an actor's current turn state: who, what event, and what actions produced
 
 ;; a Dataspace is a
 ;; (dataspace (Hashof ActorPath Actor)
@@ -51,23 +51,31 @@
   (define ds (mark-last-op ds/pre type))
   (match* (type detail)
     [('turn-begin _process)
-     ds]
+     (match (dataspace-active ds)
+       [(list who evt _) (struct-copy dataspace ds
+                                     [active (list who evt #f)])]
+       [_ ds])]
     [('turn-end _process)
      (struct-copy dataspace ds
-                  [active #f])]
+                  [active #f]
+                  [pending-acts (if (dataspace-active ds)
+                                  (cons (pending (spacetime-space (first (dataspace-active ds))) '())
+                                       (dataspace-pending-acts ds))
+                                  (dataspace-pending-acts ds))])]
     [('spawn (synd:process name _beh _state))
      (struct-copy dataspace (remove-action ds synd:actor? source)
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
     [('exit exn-or-false)
      (remove-actor ds (spacetime-space sink))]
     [('actions-produced actions)
-     (cond
-       [(null? actions)
-        ds]
-       [else
+     (match (dataspace-active ds)
+       [(list who evt _)
+        (define labeled-actions (label-actions actions))
         (struct-copy dataspace ds
-                     [pending-acts (cons (pending sink (label-actions actions))
-                                         (dataspace-pending-acts ds))])])]
+                     [active (list who evt labeled-actions)]
+                     [pending-acts (cons (pending sink labeled-actions)
+                                       (dataspace-pending-acts ds))])]
+       [_ ds])]
     [('action-interpreted (? synd:patch? p))
      (define p* (patch-relabel p (const DEFAULT-LABEL)))
      (define who (spacetime-space source))
@@ -81,7 +89,7 @@
     [('event (list _cause evt))
      (define who (spacetime-space sink))
      (struct-copy dataspace ds
-                  [active (list who evt)])]))
+                  [active (list who evt #f)])]))
 
 (define (mark-last-op ds type)
   (define label (match type
@@ -443,8 +451,9 @@
                   (hash-set (actor->json v) 'id (~a k)))
         'active_actor (match (dataspace-active ds)
                         [#f #f]
-                        [(list who evt) (hash 'actor (~a who)
-                                              'event (action->json evt))])
+                        [(list who evt acts) (hash 'actor (~a who)
+                                                 'event (action->json evt)
+                                                 'actions (and acts (map action->json acts)))])
         'recent_messages (map action->json (dataspace-recent-messages ds))
         'pending_actions (for/list ([p (in-list (dataspace-pending-acts ds))])
                            (hash 'origin (spacetime->json (pending-origin p))
@@ -497,17 +506,18 @@
                         'last_op #f))
 
     (define ds2 (dataspace (hash '(1) (new-actor 'test))
-                           (list '(1) 'test-evt)
+                           (list '(1) 'test-evt (list 'act1))
                            (list 'msg1)
                            (list (pending (spacetime '(1) 123)
-                                          (list 'act1)))
+                                        (list 'act1)))
                            'action-interpreted))
     (check-equal? (dataspace->json ds2)
                   (hash 'actors (list (hash 'id "(1)"
                                             'name "test"
                                             'assertions '()))
                         'active_actor (hash 'actor "(1)"
-                                            'event "'test-evt")
+                                          'event "'test-evt"
+                                          'actions '("'act1"))
                         'recent_messages (list "'msg1")
                         'last_op "action-interpreted"
                         'pending_actions (list (hash 'origin (hash 'space "(1)"
