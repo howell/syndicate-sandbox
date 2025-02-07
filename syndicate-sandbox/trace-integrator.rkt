@@ -51,14 +51,14 @@
   (define ds (mark-last-op ds/pre type))
   (match* (type detail)
     [('turn-begin _process)
-     ds]
+     ds/pre]
     [('turn-end _process)
-     ds]
+     ds/pre]
     [('spawn (synd:process name _beh _state))
      (struct-copy dataspace (remove-action (deactivate-active ds) synd:actor? source)
                   [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
     [('exit exn-or-false)
-     ds]
+     ds/pre]
     [('actions-produced actions)
      (match (dataspace-active ds)
        [(list who evt _)
@@ -70,7 +70,7 @@
         (struct-copy dataspace ds
                      [active (list who evt labeled-actions)]
                      [pending-acts next-pending])]
-       [_ ds])]
+       [_ ds/pre])]
     [('action-interpreted (? synd:patch? p))
      (define p* (patch-relabel p (const DEFAULT-LABEL)))
      (define who (spacetime-space source))
@@ -80,7 +80,7 @@
     [('action-interpreted 'quit)
      (remove-actor (remove-action (deactivate-active ds) 'quit source) (spacetime-space source))]
     [('event (list _cause #f))
-     (deactivate-active ds)]
+     (deactivate-active ds/pre)]
     [('event (list _cause evt))
      (define who (spacetime-space sink))
      (struct-copy dataspace ds
