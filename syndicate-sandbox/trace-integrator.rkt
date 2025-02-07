@@ -55,8 +55,9 @@
     [('turn-end _process)
      ds/pre]
     [('spawn (synd:process name _beh _state))
-     (struct-copy dataspace (remove-action (deactivate-active ds) synd:actor? source)
-                  [actors (hash-set (dataspace-actors ds) (spacetime-space sink) (new-actor name))])]
+     (define who (spacetime-space sink))
+     (struct-copy dataspace (remove-action (activate-actor ds who 'boot) synd:actor? source)
+                  [actors (hash-set (dataspace-actors ds) who (new-actor name))])]
     [('exit exn-or-false)
      ds/pre]
     [('actions-produced actions)
@@ -82,9 +83,7 @@
     [('event (list _cause #f))
      (deactivate-active ds/pre)]
     [('event (list _cause evt))
-     (define who (spacetime-space sink))
-     (struct-copy dataspace ds
-                  [active (list who evt #f)])]))
+     (activate-actor ds (spacetime-space sink) evt)]))
 
 (define (mark-last-op ds type)
   (define label (match type
@@ -95,6 +94,10 @@
                   ['event 'dispatch-event]
                   [_ type]))
   (struct-copy dataspace ds [last-op label]))
+
+(define (activate-actor ds who evt)
+  (struct-copy dataspace ds
+               [active (list who evt #f)]))
 
 (define (deactivate-active ds)
   (cond
@@ -477,6 +480,8 @@
      (list "spawn" (trie->json (synd:actor-initial-assertions a)))]
     [(synd:message? a)
      (list "message" (~v a))]
+    [(equal? a 'boot)
+     "boot"]
     [else
      (~v a)]))
 
