@@ -482,6 +482,8 @@
      (list "message" (~v a))]
     [(equal? a 'boot)
      "boot"]
+    [(equal? a 'quit)
+     "quit"]
     [else
      (~v a)]))
 
