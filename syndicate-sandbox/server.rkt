@@ -5,7 +5,7 @@
          phx-port)
 
 (require "session.rkt"
-         "trace-integrator.rkt"
+         "dataspace-trace-integrator.rkt"
          racket/date
          net/url
          json

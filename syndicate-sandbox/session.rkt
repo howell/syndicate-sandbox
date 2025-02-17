@@ -10,7 +10,7 @@
          flush-session
          session-memory-usage)
 
-(require "trace-integrator.rkt"
+(require "dataspace-trace-integrator.rkt"
          racket/sandbox
          racket/async-channel)
 
@@ -40,7 +40,7 @@
                    [sandbox-eval-handlers (list #f
                                                 call-with-killing-threads)]
                    [sandbox-namespace-specs (list sandbox-make-namespace
-                                                  'syndicate-sandbox/trace-integrator)]
+                                                  'syndicate-sandbox/dataspace-trace-integrator)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list '(submod syndicate-sandbox/session sandbox-init)
@@ -57,7 +57,7 @@
            (only-in syndicate/store with-store)
            (only-in syndicate/trace current-trace-procedures)
            racket/async-channel
-           "trace-integrator.rkt")
+           "dataspace-trace-integrator.rkt")
   (define (init-session)
     (let ([ready-chan (make-async-channel)])
       (thread (lambda ()
