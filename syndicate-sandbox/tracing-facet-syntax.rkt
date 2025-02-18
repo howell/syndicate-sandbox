@@ -16,7 +16,9 @@
          define/query-count
 
          current-endpoint-notification-handler
-         (struct-out endpoint-notification))
+
+         (struct-out endpoint-notification)
+         endpoint-notification->json)
 
 (require (prefix-in synd: syndicate/actor-lang)
          (submod syndicate/actor implementation-details)

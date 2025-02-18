@@ -1,6 +1,7 @@
 #lang racket
 
-(provide make-combined-tracer)
+(provide make-combined-tracer
+         actor-env->json)
 
 #|
 Receive updates from both the dataspace trace and facet endpoints trace to build
@@ -11,7 +12,11 @@ an association between each actor's facets and endpoints
          "tracing-facet-syntax.rkt"
          "dataspace-trace-integrator.rkt"
          racket/async-channel
-         syndicate/trace)
+         syndicate/trace
+         json)
+
+(module+ test
+  (require rackunit))
 
 ;; an ActorEnv is a (Hashof PID ActorDetail)
 ;; an ActorDetail is a (Hashof FID FacetDetail)
@@ -55,3 +60,70 @@ an association between each actor's facets and endpoints
                  (lambda (existing-eps) (cons evt existing-eps))
                  '()))
   (hash-update env pid add-ep (hash)))
+
+;; ActorEnv -> JSExpr
+(define (actor-env->json env)
+  (for/list ([(pid facets) (in-hash env)])
+    (hash 'actor_id (~a pid)
+          'facets (facets->json facets))))
+
+;; (Hashof FID FacetDetail) -> JSExpr
+(define (facets->json facets)
+  (for/list ([(fid endpoints) (in-hash facets)])
+    (hash 'facet_id (~a fid)
+          'endpoints (map endpoint-notification->json endpoints))))
+
+(module+ test
+  (require (submod syndicate/actor implementation-details))
+
+  (test-case "actor-env->json"
+    (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
+    (define sample-env
+      (hash '(actor1)
+            (hash '(facet1)
+                  (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)))))
+
+    (check-equal?
+     (actor-env->json sample-env)
+     (list (hash 'actor_id "(actor1)"
+                 'facets
+                 (list (hash 'facet_id "(facet1)"
+                             'endpoints
+                             (list (hash 'facet_id "(facet1)"
+                                         'type "endpoint"
+                                         'detail "'(assert 'hello)"
+                                         'location (hash 'source "test.rkt"
+                                                         'line 1
+                                                         'column 5
+                                                         'position 50
+                                                         'span 10))))))))
+
+    (test-case "facets->json"
+      (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
+      (define sample-facets
+        (hash '(facet1)
+              (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)
+                    (endpoint-notification '(facet1) 'field
+                                           (field-handle (field-descriptor 'test #f))
+                                           sample-srcloc))))
+
+      (check-equal?
+       (facets->json sample-facets)
+       (list (hash 'facet_id "(facet1)"
+                   'endpoints
+                   (list (hash 'facet_id "(facet1)"
+                               'type "endpoint"
+                               'detail "'(assert 'hello)"
+                               'location (hash 'source "test.rkt"
+                                               'line 1
+                                               'column 5
+                                               'position 50
+                                               'span 10))
+                         (hash 'facet_id "(facet1)"
+                               'type "field"
+                               'detail (hash 'field_name "test")
+                               'location (hash 'source "test.rkt"
+                                               'line 1
+                                               'column 5
+                                               'position 50
+                                               'span 10)))))))))
