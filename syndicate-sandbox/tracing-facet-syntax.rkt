@@ -13,23 +13,37 @@
          define/query-set
          define/query-hash
          define/query-hash-set
-         define/query-count)
+         define/query-count
+
+         current-association-handler
+         (struct-out endpoint-notification))
 
 (require (prefix-in synd: syndicate/actor-lang)
          (submod syndicate/actor implementation-details)
          syntax/parse/define
-         (for-syntax racket/syntax))
+         (for-syntax racket/syntax
+                     racket/match
+                     syntax/stx
+                     racket/syntax-srcloc))
 
 (module+ test
   (require rackunit)
   (require syndicate/test/test-dataspace))
 
+(struct endpoint-notification (fid desc detail srcloc) #:transparent)
+
+(define-for-syntax (quote-src stx)
+  (match-define (srcloc src line col pos span) (syntax-srcloc stx))
+  (quasisyntax/loc stx
+    '(srcloc #,src #,line #,col #,pos #,span)))
+
 (define-syntax-parse-rule (define-tracing-endpoint nm:id)
   #:with synd-name (format-id #'nm "synd:~a" #'nm)
+  #:with src (quote-src this-syntax)
   (define-syntax-parse-rule (nm . body)
     #:with the-ep this-syntax
     (begin
-      (associate-endpoint! 'the-ep)
+      (associate-endpoint! 'the-ep src)
       (synd-name . body))))
 
 (define-simple-macro (define-tracing-endpoints nm:id ...+)
@@ -46,17 +60,19 @@
   during)
 
 (define-syntax-parse-rule (field [nm:id v0] ...)
+  #:with (src ...) (stx-map quote-src #'(nm ...))
   (begin
     (synd:field [nm v0] ...)
-    (associate-field! nm)
+    (associate-field! nm src)
     ...))
 
 (define-syntax-parse-rule (define-tracing-query nm:id)
   #:with synd-name (format-id #'nm "synd:~a" #'nm)
+  #:with src (quote-src this-syntax)
   (define-syntax-parse-rule (nm field-nm:id . body)
     (begin
       (synd-name field-nm . body)
-      (associate-field! field-nm))))
+      (associate-field! field-nm src))))
 
 (define-tracing-query define/query-value)
 (define-tracing-query define/query-set)
@@ -71,23 +87,26 @@
 ;;   - 'field
 (define current-association-handler (make-parameter #f))
 
-(define (associate-endpoint! ep)
-  (printf "associate-endpoint! ~a\n" (current-association-handler))
+(define (associate-endpoint! ep src)
   (when (current-association-handler)
-    (printf "calling handler!\n")
-    ((current-association-handler) 'endpoint ep)))
+    ((current-association-handler) (endpoint-notification (synd:current-facet-id)
+                                                          'endpoint
+                                                          ep
+                                                          src))))
 
-(define (associate-field! nm)
+(define (associate-field! nm src)
   (when (current-association-handler)
-    ((current-association-handler) 'field nm)))
+    ((current-association-handler) (endpoint-notification (synd:current-facet-id)
+                                                          'field
+                                                          nm
+                                                          src))))
 
 (module+ test
   (define-syntax-parse-rule (with-recording-handler store:id body ...+)
     (let ([store '()])
-      (parameterize ([current-association-handler (lambda (type ep)
-                                                    (define fid (synd:current-facet-id))
-                                                    (printf "fid ~a has endpoint: ~a\n" fid ep)
-                                                    (set! store (cons (list type fid ep)
+      (parameterize ([current-association-handler (lambda (evt)
+                                                    (printf "Endpoint Event: ~a\n" evt)
+                                                    (set! store (cons evt
                                                                       store)))])
         body ...)))
 
@@ -96,7 +115,7 @@
       (with-test-dataspace [(synd:spawn (assert 'hello))]
         (check-true (asserted? 'hello))
         (check-match store
-                     (list (list 'endpoint (? list?) (== '(assert 'hello))))))))
+                     (list (endpoint-notification (? list?) 'endpoint (== '(assert 'hello)) _))))))
 
   (test-case "field associates field-handle with facet"
     (with-recording-handler store
@@ -104,13 +123,12 @@
                                         (assert (breakfast)))]
         (check-true (asserted? 'toast))
         (check-match store
-                     (list (list 'endpoint (? list?) (== '(assert (breakfast))))
-                           (list 'field (? list?) (field-handle (field-descriptor 'breakfast _))))))))
+                     (list (endpoint-notification (? list?) 'endpoint (== '(assert (breakfast))) _)
+                           (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'breakfast _)) _))))))
 
   (test-case "simple query definition"
     (with-recording-handler store
       (with-test-dataspace [(synd:spawn (define/query-set brekkers (list 'breakfast $v) v))]
         (check-true (asserted? (synd:observe (list 'breakfast synd:?))))
         (check-match store
-                     (list (list 'field (? list?) (field-handle (field-descriptor 'brekkers _)))))))
-    ))
+                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) _)))))))

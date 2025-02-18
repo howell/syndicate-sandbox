@@ -2,10 +2,14 @@
 
 (provide make-trace-integrator
          current-trace-channel
+         apply-notification
+         (struct-out dataspace)
+         active-actor-id
          dataspace->json
          actor->json)
 
-(require syndicate/trace
+(require "tracing.rkt"
+         syndicate/trace
          syndicate/trie
          syndicate/tset
          syndicate/patch
@@ -34,8 +38,6 @@
 ;;            (Listof PendingAction)
 ;;            (Optionof Symbol))
 (struct dataspace (actors active recent-messages pending-acts last-op) #:transparent)
-
-(define current-trace-channel (make-parameter (make-async-channel)))
 
 (define (make-trace-integrator [ch (current-trace-channel)] #:max-messages [max-msgs 5])
   (define curr-ds (dataspace (hash) #f '() '() #f))
@@ -84,6 +86,11 @@
      (deactivate-active ds/pre)]
     [('event (list _cause evt))
      (activate-actor ds (spacetime-space sink) evt)]))
+
+;; Dataspace -> (Optionof ActorPath)
+(define (active-actor-id ds)
+  (and (dataspace-active ds)
+       (first (dataspace-active ds))))
 
 (define (mark-last-op ds type)
   (define label (match type
