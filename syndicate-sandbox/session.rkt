@@ -45,8 +45,8 @@
                    [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list '(submod syndicate-sandbox/session sandbox-init)
+                                       'syndicate-sandbox/lang
                                        'syndicate/drivers/timestate)
-                      '(require (except-in syndicate/interactive-lang #%module-begin))
                       '(void (init-session)))))
   (session id evaluator std-in err-in trace-chan))
 
