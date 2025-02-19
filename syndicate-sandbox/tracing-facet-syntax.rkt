@@ -38,7 +38,7 @@
 (define-for-syntax (quote-src stx)
   (match-define (srcloc src line col pos span) (syntax-srcloc stx))
   (quasisyntax/loc stx
-    '(srcloc #,src #,line #,col #,pos #,span)))
+    (srcloc #,src #,line #,col #,pos #,span)))
 
 (define-syntax-parse-rule (define-tracing-endpoint nm:id (~optional nm-:id))
   #:with synd-name (or (attribute nm-) (format-id #'nm "synd:~a" #'nm))
@@ -119,7 +119,7 @@
       (with-test-dataspace [(synd:spawn (assert 'hello))]
         (check-true (asserted? 'hello))
         (check-match store
-                     (list (endpoint-notification (? list?) 'endpoint (== '(assert 'hello)) _))))))
+                     (list (endpoint-notification (? list?) 'endpoint (== '(assert 'hello)) (? srcloc?)))))))
 
   (test-case "field associates field-handle with facet"
     (with-recording-handler store
@@ -127,15 +127,15 @@
                                         (assert (breakfast)))]
         (check-true (asserted? 'toast))
         (check-match store
-                     (list (endpoint-notification (? list?) 'endpoint (== '(assert (breakfast))) _)
-                           (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'breakfast _)) _))))))
+                     (list (endpoint-notification (? list?) 'endpoint (== '(assert (breakfast))) (? srcloc?))
+                           (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'breakfast _)) (? srcloc?)))))))
 
   (test-case "simple query definition"
     (with-recording-handler store
       (with-test-dataspace [(synd:spawn (define/query-set brekkers (list 'breakfast $v) v))]
         (check-true (asserted? (synd:observe (list 'breakfast synd:?))))
         (check-match store
-                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) _))))))
+                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) (? srcloc?)))))))
 
   (test-case "assert still works with repl"
     (with-recording-handler store
@@ -143,7 +143,7 @@
         (assert 'momma)
         (check-true (asserted? 'momma))
         (check-match store
-                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) _)))))))
+                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) (? srcloc?))))))))
 
 
 ;; EndpointNotification -> JSExpr
