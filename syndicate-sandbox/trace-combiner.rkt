@@ -28,8 +28,12 @@ an association between each actor's facets and endpoints
 (define (make-combined-tracer [ch (current-trace-channel)])
   (define curr-ds (dataspace (hash) #f '() '() #f))
   (define curr-facets (hash))
+  ;; because the actor's behavior and state are initialized BEFORE the spawn trace event, we need to keep these around
+  (define pending-endpoint-evts '())
   (define (on-event evt)
-    (define-values (next-ds next-facets) (receive-update curr-ds curr-facets evt))
+    (define-values (next-ds next-facets next-pending-evts)
+      (receive-update curr-ds curr-facets pending-endpoint-evts evt))
+    (set! pending-endpoint-evts next-pending-evts)
     (unless (eq? next-ds curr-ds)
       (async-channel-put ch next-ds)
       (set! curr-ds next-ds))
@@ -39,18 +43,26 @@ an association between each actor's facets and endpoints
   on-event)
 
 ;; Dataspace ActorEnv TraceEvent -> {Values Dataspace ActorEnv}
-(define (receive-update curr-ds curr-facets evt)
+(define (receive-update curr-ds curr-facets pending-endpoint-evts evt)
   (cond
+    [(and (not (empty? pending-endpoint-evts))
+          (trace-notification? evt)
+          (equal? 'spawn (trace-notification-type evt)))
+     (define spawned-pid (spacetime-space (trace-notification-sink evt)))
+     (values (apply-notification curr-ds evt)
+             (apply-pending-evts curr-facets spawned-pid pending-endpoint-evts)
+             '())]
     [(trace-notification? evt)
      (values (apply-notification curr-ds evt)
-             curr-facets)]
+             curr-facets
+             pending-endpoint-evts)]
     [(and (endpoint-notification? evt)
           (active-actor-id curr-ds))
      (values curr-ds
-             (associate-endpoint curr-facets (active-actor-id curr-ds) evt))]
+             (associate-endpoint curr-facets (active-actor-id curr-ds) evt)
+             pending-endpoint-evts)]
     [else
-     (log-sandbox-trace-warning "Received unexpected trace event: ~a" evt)
-     (values curr-ds curr-facets)]))
+     (values curr-ds curr-facets (cons evt pending-endpoint-evts))]))
 
 ;; ActorEnv PID EndpointNotification -> ActorEnv
 (define (associate-endpoint env pid evt)
@@ -60,6 +72,11 @@ an association between each actor's facets and endpoints
                  (lambda (existing-eps) (cons evt existing-eps))
                  '()))
   (hash-update env pid add-ep (hash)))
+
+(define (apply-pending-evts env pid evts)
+  (for/fold ([env env])
+            ([evt (in-list evts)])
+    (associate-endpoint env pid evt)))
 
 ;; ActorEnv -> JSExpr
 (define (actor-env->json env)
@@ -74,7 +91,10 @@ an association between each actor's facets and endpoints
           'endpoints (map endpoint-notification->json endpoints))))
 
 (module+ test
-  (require (submod syndicate/actor implementation-details))
+  (require (submod syndicate/actor implementation-details)
+           syndicate/store
+           syndicate/test/test-dataspace
+           "lang.rkt")
 
   (test-case "actor-env->json"
     (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
@@ -128,4 +148,30 @@ an association between each actor's facets and endpoints
                                              'position 50
                                              'span 10)))))))
 
-  )
+  (define (channel->list ch)
+    (define r (async-channel-try-get ch))
+    (if r
+        (cons r (channel->list ch))
+        '()))
+
+  (test-case "pending endpoint events are applied to spawned actor"
+    (define test-ch (make-async-channel))
+    (define on-evt (make-combined-tracer test-ch))
+    (parameterize ([current-endpoint-notification-handler on-evt])
+      (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
+        (with-test-dataspace []
+          (void (channel->list test-ch))
+          (spawn (assert 'hello))
+          (sleep 1/4)
+          (define evts (channel->list test-ch))
+          (pretty-display evts)
+          (define actor-env? hash?)
+          (define env-evt (findf actor-env? evts))
+          (check-not-false env-evt)
+          (check-match env-evt
+                       (hash '(2)
+                             (hash '(4)
+                                   (list (endpoint-notification '(4)
+                                                                'endpoint
+                                                                '(assert 'hello)
+                                                                (? srcloc?)))))))))))
