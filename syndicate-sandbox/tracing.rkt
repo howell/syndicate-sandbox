@@ -4,6 +4,6 @@
 
 (require racket/async-channel)
 
-(define-logger syndicate-trace)
+(define-logger sandbox-trace)
 
 (define current-trace-channel (make-parameter (make-async-channel)))

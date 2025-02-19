@@ -49,7 +49,7 @@ an association between each actor's facets and endpoints
      (values curr-ds
              (associate-endpoint curr-facets (active-actor-id curr-ds) evt))]
     [else
-     (log-syndicate-trace-warning "Received unexpected trace event: ~a" evt)
+     (log-sandbox-trace-warning "Received unexpected trace event: ~a" evt)
      (values curr-ds curr-facets)]))
 
 ;; ActorEnv PID EndpointNotification -> ActorEnv
