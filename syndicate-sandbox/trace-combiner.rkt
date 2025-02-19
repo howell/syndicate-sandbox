@@ -96,34 +96,36 @@ an association between each actor's facets and endpoints
                                                          'line 1
                                                          'column 5
                                                          'position 50
-                                                         'span 10))))))))
+                                                         'span 10)))))))))
 
-    (test-case "facets->json"
-      (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
-      (define sample-facets
-        (hash '(facet1)
-              (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)
-                    (endpoint-notification '(facet1) 'field
-                                           (field-handle (field-descriptor 'test #f))
-                                           sample-srcloc))))
+  (test-case "facets->json"
+    (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
+    (define sample-facets
+      (hash '(facet1)
+            (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)
+                  (endpoint-notification '(facet1) 'field
+                                         (field-handle (field-descriptor 'test #f))
+                                         sample-srcloc))))
 
-      (check-equal?
-       (facets->json sample-facets)
-       (list (hash 'facet_id "(facet1)"
-                   'endpoints
-                   (list (hash 'facet_id "(facet1)"
-                               'type "endpoint"
-                               'detail "'(assert 'hello)"
-                               'location (hash 'source "test.rkt"
-                                               'line 1
-                                               'column 5
-                                               'position 50
-                                               'span 10))
-                         (hash 'facet_id "(facet1)"
-                               'type "field"
-                               'detail (hash 'field_name "test")
-                               'location (hash 'source "test.rkt"
-                                               'line 1
-                                               'column 5
-                                               'position 50
-                                               'span 10)))))))))
+    (check-equal?
+     (facets->json sample-facets)
+     (list (hash 'facet_id "(facet1)"
+                 'endpoints
+                 (list (hash 'facet_id "(facet1)"
+                             'type "endpoint"
+                             'detail "'(assert 'hello)"
+                             'location (hash 'source "test.rkt"
+                                             'line 1
+                                             'column 5
+                                             'position 50
+                                             'span 10))
+                       (hash 'facet_id "(facet1)"
+                             'type "field"
+                             'detail (hash 'field_name "test")
+                             'location (hash 'source "test.rkt"
+                                             'line 1
+                                             'column 5
+                                             'position 50
+                                             'span 10)))))))
+
+  )
