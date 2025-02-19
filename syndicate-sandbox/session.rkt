@@ -41,6 +41,7 @@
                                                 call-with-killing-threads)]
                    [sandbox-namespace-specs (list sandbox-make-namespace
                                                   'syndicate-sandbox/tracing
+                                                  'syndicate-sandbox/tracing-facet-syntax
                                                   'syndicate-sandbox/trace-combiner)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
