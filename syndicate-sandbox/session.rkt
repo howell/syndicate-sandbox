@@ -10,7 +10,7 @@
          flush-session
          session-memory-usage)
 
-(require "dataspace-trace-integrator.rkt"
+(require "tracing.rkt"
          racket/sandbox
          racket/async-channel)
 
@@ -40,7 +40,8 @@
                    [sandbox-eval-handlers (list #f
                                                 call-with-killing-threads)]
                    [sandbox-namespace-specs (list sandbox-make-namespace
-                                                  'syndicate-sandbox/dataspace-trace-integrator)]
+                                                  'syndicate-sandbox/tracing
+                                                  'syndicate-sandbox/trace-combiner)]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list '(submod syndicate-sandbox/session sandbox-init)
@@ -57,7 +58,8 @@
            (only-in syndicate/store with-store)
            (only-in syndicate/trace current-trace-procedures)
            racket/async-channel
-           "dataspace-trace-integrator.rkt")
+           "trace-combiner.rkt"
+           "tracing-facet-syntax.rkt")
   (define (init-session)
     (let ([ready-chan (make-async-channel)])
       (thread (lambda ()
@@ -71,9 +73,11 @@
                                       (displayln (vector-ref v 1) (current-error-port)))))
                   (loop))))
       (async-channel-get ready-chan)
+      (define trace-proc (make-combined-tracer))
       (thread (lambda ()
-                (with-store ([current-trace-procedures (cons (make-trace-integrator) (current-trace-procedures))])
-                  (run-ground (boot-repl #:when-ready ready-chan)))))
+                (parameterize ([current-endpoint-notification-handler trace-proc])
+                  (with-store ([current-trace-procedures (cons trace-proc (current-trace-procedures))])
+                    (run-ground (boot-repl #:when-ready ready-chan))))))
       (async-channel-get ready-chan)
       (repl-activate syndicate/drivers/timestate))))
 

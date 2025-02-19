@@ -1,7 +1,6 @@
 #lang racket
 
 (provide make-trace-integrator
-         current-trace-channel
          apply-notification
          (struct-out dataspace)
          active-actor-id

@@ -165,11 +165,16 @@
 (define (push-trace-evt id trace-chan)
   (handle-evt trace-chan
               (lambda (evt)
-                (define seq-no (next-seq-no! id TRACE-TYPE))
-                (log-sandbox-server-info "~a: Sending session ~a trace step ~a" (timestamp) id seq-no)
-                (define url (format "/api/sessions/~a/output" id))
-                (define msg (hash 'type (~a TRACE-TYPE) 'data (dataspace->json evt) 'seq_no seq-no))
-                (post-http! url msg))))
+                (cond
+                  [(dataspace? evt)
+                   (define seq-no (next-seq-no! id TRACE-TYPE))
+                   (log-sandbox-server-info "~a: Sending session ~a trace step ~a" (timestamp) id seq-no)
+                   (define url (format "/api/sessions/~a/output" id))
+                   (define msg (hash 'type (~a TRACE-TYPE) 'data (dataspace->json evt) 'seq_no seq-no))
+                   (post-http! url msg)]
+                  [else
+                   (log-sandbox-server-info "Non-dataspace trace event")
+                   #t]))))
 
 (define (next-seq-no! id type)
   (define the-session (hash-ref session-envs id))
