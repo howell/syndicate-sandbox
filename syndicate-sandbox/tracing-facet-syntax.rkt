@@ -21,6 +21,7 @@
          endpoint-notification->json)
 
 (require (prefix-in synd: syndicate/actor-lang)
+         (prefix-in repl: syndicate/interactive-lang)
          (submod syndicate/actor implementation-details)
          syntax/parse/define
          (for-syntax racket/syntax
@@ -39,8 +40,8 @@
   (quasisyntax/loc stx
     '(srcloc #,src #,line #,col #,pos #,span)))
 
-(define-syntax-parse-rule (define-tracing-endpoint nm:id)
-  #:with synd-name (format-id #'nm "synd:~a" #'nm)
+(define-syntax-parse-rule (define-tracing-endpoint nm:id (~optional nm-:id))
+  #:with synd-name (or (attribute nm-) (format-id #'nm "synd:~a" #'nm))
   #:with src (quote-src this-syntax)
   (define-syntax-parse-rule (nm . body)
     #:with the-ep this-syntax
@@ -53,8 +54,9 @@
     (define-tracing-endpoint nm)
     ...))
 
+(define-tracing-endpoint assert repl:assert)
+
 (define-tracing-endpoints
-  assert
   on-stop
   begin/dataflow
   stop-when
@@ -133,7 +135,15 @@
       (with-test-dataspace [(synd:spawn (define/query-set brekkers (list 'breakfast $v) v))]
         (check-true (asserted? (synd:observe (list 'breakfast synd:?))))
         (check-match store
-                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) _)))))))
+                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) _))))))
+
+  (test-case "assert still works with repl"
+    (with-recording-handler store
+      (with-test-dataspace [#f]
+        (assert 'momma)
+        (check-true (asserted? 'momma))
+        (check-match store
+                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) _)))))))
 
 
 ;; EndpointNotification -> JSExpr
