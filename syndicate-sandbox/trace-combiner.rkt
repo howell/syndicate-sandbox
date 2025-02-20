@@ -13,6 +13,7 @@ an association between each actor's facets and endpoints
          "dataspace-trace-integrator.rkt"
          racket/async-channel
          syndicate/trace
+         (prefix-in synd: (submod syndicate/actor implementation-details))
          json)
 
 (module+ test
@@ -20,7 +21,17 @@ an association between each actor's facets and endpoints
 
 ;; an ActorEnv is a (Hashof PID ActorDetail)
 ;; an ActorDetail is a (Hashof FID FacetDetail)
-;; a FacetDetail is a (Listof EndpointDetail)
+
+;; a FacetDetail is a (facet FID (Listof Field) (Listof Endpoint) (Setof FID))
+(struct facet (id fields eps children) #:transparent)
+(define (make-facet fid) (facet fid '() '() (set)))
+
+;; a Field is a (field FieldHandle Any SrcLoc)
+(struct field (handle val src) #:transparent)
+
+;; an Endpoint is a (endpoint Any SrcLoc)
+(struct endpoint (description src) #:transparent)
+
 ;; an EndpointDetail is a (List Symbol Any)
 
 ;; a TraceEvent is a TraceNotification or an EndpointNotification
@@ -66,12 +77,33 @@ an association between each actor's facets and endpoints
 
 ;; ActorEnv PID EndpointNotification -> ActorEnv
 (define (associate-endpoint env pid evt)
-  (define (add-ep existing-facets)
+  (define fid (endpoint-notification-fid evt))
+  (define (update-actor existing-facets)
     (hash-update existing-facets
-                 (endpoint-notification-fid evt)
-                 (lambda (existing-eps) (cons evt existing-eps))
-                 '()))
-  (hash-update env pid add-ep (hash)))
+                 fid
+                 (lambda (fct) (add-notification fct evt))
+                 (lambda () (make-facet fid))))
+  (hash-update env pid update-actor (hash)))
+
+;; Facet EndpointNotification -> Facet
+(define (add-notification fct evt)
+  (define adder
+    (case (endpoint-notification-desc evt)
+      [(endpoint) add-ep]
+      [(field) add-field]))
+  (adder fct
+         (endpoint-notification-detail evt)
+         (endpoint-notification-srcloc evt)))
+
+(define (add-ep fct desc src)
+  (struct-copy facet fct
+               [eps (cons (endpoint desc src)
+                          (facet-eps fct))]))
+
+(define (add-field fct handle src)
+  (struct-copy facet fct
+               [fields (cons (field handle (handle) src)
+                             (facet-fields fct))]))
 
 (define (apply-pending-evts env pid evts)
   (for/fold ([env env])
@@ -91,8 +123,7 @@ an association between each actor's facets and endpoints
           'endpoints (map endpoint-notification->json endpoints))))
 
 (module+ test
-  (require (submod syndicate/actor implementation-details)
-           syndicate/store
+  (require syndicate/store
            syndicate/test/test-dataspace
            "lang.rkt")
 
@@ -124,7 +155,7 @@ an association between each actor's facets and endpoints
       (hash '(facet1)
             (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)
                   (endpoint-notification '(facet1) 'field
-                                         (field-handle (field-descriptor 'test #f))
+                                         (synd:field-handle (synd:field-descriptor 'test #f))
                                          sample-srcloc))))
 
     (check-equal?
@@ -164,14 +195,14 @@ an association between each actor's facets and endpoints
           (spawn (assert 'hello))
           (sleep 1/4)
           (define evts (channel->list test-ch))
-          (pretty-display evts)
           (define actor-env? hash?)
           (define env-evt (findf actor-env? evts))
           (check-not-false env-evt)
           (check-match env-evt
                        (hash '(2)
                              (hash '(4)
-                                   (list (endpoint-notification '(4)
-                                                                'endpoint
-                                                                '(assert 'hello)
-                                                                (? srcloc?)))))))))))
+                                   (facet '(4)
+                                          '()
+                                          (list (endpoint '(assert 'hello)
+                                                          (? srcloc?)))
+                                          (== (set)))))))))))
