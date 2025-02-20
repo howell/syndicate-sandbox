@@ -17,7 +17,10 @@ an association between each actor's facets and endpoints
          json)
 
 (module+ test
-  (require rackunit))
+  (require rackunit
+           syndicate/store
+           syndicate/test/test-dataspace
+           "lang.rkt"))
 
 ;; an ActorEnv is a (Hashof PID ActorDetail)
 ;; an ActorDetail is a (Hashof FID FacetDetail)
@@ -110,6 +113,38 @@ an association between each actor's facets and endpoints
             ([evt (in-list evts)])
     (associate-endpoint env pid evt)))
 
+(module+ test
+  (define (channel->list ch)
+    (define r (async-channel-try-get ch))
+    (if r
+        (cons r (channel->list ch))
+        '()))
+
+  (test-case "pending endpoint events are applied to spawned actor"
+    (define test-ch (make-async-channel))
+    (define on-evt (make-combined-tracer test-ch))
+    (parameterize ([current-endpoint-notification-handler on-evt])
+      (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
+        (with-test-dataspace []
+          (void (channel->list test-ch))
+          (spawn (assert 'hello))
+          (sleep 1/4)
+          (define evts (channel->list test-ch))
+          (define actor-env? hash?)
+          (define env-evt (findf actor-env? evts))
+          (check-not-false env-evt)
+          (check-match env-evt
+                       (hash '(2)
+                             (hash '(4)
+                                   (facet '(4)
+                                          '()
+                                          (list (endpoint '(assert 'hello)
+                                                          (? srcloc?)))
+                                          (== (set)))))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; JSON
+
 ;; ActorEnv -> JSExpr
 (define (actor-env->json env)
   (for/list ([(pid facets) (in-hash env)])
@@ -123,10 +158,6 @@ an association between each actor's facets and endpoints
           'endpoints (map endpoint-notification->json endpoints))))
 
 (module+ test
-  (require syndicate/store
-           syndicate/test/test-dataspace
-           "lang.rkt")
-
   (test-case "actor-env->json"
     (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
     (define sample-env
@@ -177,32 +208,4 @@ an association between each actor's facets and endpoints
                                              'line 1
                                              'column 5
                                              'position 50
-                                             'span 10)))))))
-
-  (define (channel->list ch)
-    (define r (async-channel-try-get ch))
-    (if r
-        (cons r (channel->list ch))
-        '()))
-
-  (test-case "pending endpoint events are applied to spawned actor"
-    (define test-ch (make-async-channel))
-    (define on-evt (make-combined-tracer test-ch))
-    (parameterize ([current-endpoint-notification-handler on-evt])
-      (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
-        (with-test-dataspace []
-          (void (channel->list test-ch))
-          (spawn (assert 'hello))
-          (sleep 1/4)
-          (define evts (channel->list test-ch))
-          (define actor-env? hash?)
-          (define env-evt (findf actor-env? evts))
-          (check-not-false env-evt)
-          (check-match env-evt
-                       (hash '(2)
-                             (hash '(4)
-                                   (facet '(4)
-                                          '()
-                                          (list (endpoint '(assert 'hello)
-                                                          (? srcloc?)))
-                                          (== (set)))))))))))
+                                             'span 10))))))))
