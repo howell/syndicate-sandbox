@@ -119,20 +119,16 @@ an association between each actor's facets and endpoints
   (define live-facets (synd:actor-state-facets as))
   (define field-table (synd:actor-state-field-table as))
 
-  ;; Only keep facets that still exist in the actor state
   (define pruned-facets
     (for/hash ([(fid fct) (in-hash facets)]
                #:when (hash-has-key? live-facets fid))
       (values fid fct)))
 
-  ;; Update each remaining facet
   (for/hash ([(fid fct) (in-hash pruned-facets)])
     (values fid
             (let* ([live-facet (hash-ref live-facets fid)]
-                   ;; Update children set
                    [with-children (struct-copy facet fct
                                                [children (synd:facet-children live-facet)])]
-                   ;; Update field values
                    [with-fields (struct-copy facet with-children
                                              [fields (update-field-values (facet-fields fct)
                                                                           field-table)])])
