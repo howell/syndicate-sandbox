@@ -20,7 +20,7 @@ an association between each actor's facets and endpoints
   (require rackunit
            syndicate/store
            syndicate/test/test-dataspace
-           "lang.rkt"))
+           (prefix-in stx: "lang.rkt")))
 
 ;; an ActorEnv is a (Hashof PID ActorDetail)
 ;; an ActorDetail is a (Hashof FID FacetDetail)
@@ -113,6 +113,41 @@ an association between each actor's facets and endpoints
             ([evt (in-list evts)])
     (associate-endpoint env pid evt)))
 
+;; ActorDetail ActorState -> ActorDetail
+;; Update the information associated with an actor's facets based on the observed state of the process
+(define (update-process-state facets as)
+  (define live-facets (synd:actor-state-facets as))
+  (define field-table (synd:actor-state-field-table as))
+
+  ;; Only keep facets that still exist in the actor state
+  (define pruned-facets
+    (for/hash ([(fid fct) (in-hash facets)]
+               #:when (hash-has-key? live-facets fid))
+      (values fid fct)))
+
+  ;; Update each remaining facet
+  (for/hash ([(fid fct) (in-hash pruned-facets)])
+    (values fid
+            (let* ([live-facet (hash-ref live-facets fid)]
+                   ;; Update children set
+                   [with-children (struct-copy facet fct
+                                               [children (synd:facet-children live-facet)])]
+                   ;; Update field values
+                   [with-fields (struct-copy facet with-children
+                                             [fields (update-field-values (facet-fields fct)
+                                                                          field-table)])])
+              with-fields))))
+
+;; (Listof Field) FieldTable -> (Listof Field)
+;; Update field values from the current field table
+(define (update-field-values fields table)
+  (for/list ([f (in-list fields)])
+    (struct-copy field f
+                 [val (ephemeron-value
+                       (hash-ref table
+                                 (synd:field-handle-desc (field-handle f))
+                                 (lambda () (field-val f))))])))
+
 (module+ test
   (define (channel->list ch)
     (define r (async-channel-try-get ch))
@@ -127,7 +162,7 @@ an association between each actor's facets and endpoints
       (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
         (with-test-dataspace []
           (void (channel->list test-ch))
-          (spawn (assert 'hello))
+          (stx:spawn (stx:assert 'hello))
           (sleep 1/4)
           (define evts (channel->list test-ch))
           (define actor-env? hash?)
@@ -138,9 +173,45 @@ an association between each actor's facets and endpoints
                              (hash '(4)
                                    (facet '(4)
                                           '()
-                                          (list (endpoint '(assert 'hello)
+                                          (list (endpoint '(stx:assert 'hello)
                                                           (? srcloc?)))
-                                          (== (set)))))))))))
+                                          (== (set))))))))))
+
+  (test-case "update-process-state removes dead facets"
+    (define test-facets
+      (hash '(1) (make-facet '(1))
+            '(2) (make-facet '(2))))
+    (define test-state
+      (synd:actor-state (void)
+                        (hash '(1) (synd:facet '(1) (hash) '() (set) #f #f))
+                        (void) (void) (hash) (void)))
+    (check-equal? (hash-keys (update-process-state test-facets test-state))
+                  '((1))))
+
+  (test-case "update-process-state updates children"
+    (define test-facets
+      (hash '(1) (make-facet '(1))))
+    (define test-state
+      (synd:actor-state (void)
+                        (hash '(1) (synd:facet '(1) (hash) '() (set '(2) '(3)) #f #f))
+                        (void) (void) (hash) (void)))
+    (check-equal? (facet-children (hash-ref (update-process-state test-facets test-state) '(1)))
+                  (set '(2) '(3))))
+
+  (test-case "update-process-state updates field values"
+    (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
+    (define test-facets
+      (hash '(1) (struct-copy facet (make-facet '(1))
+                              [fields (list (field test-handle 'old-value (void)))])))
+    (define test-state
+      (synd:actor-state (void)
+                        (hash '(1) (synd:facet '(1) (hash) '() (set) #f #f))
+                        (void) (void)
+                        (hash (synd:field-handle-desc test-handle)
+                              (make-ephemeron (synd:field-handle-desc test-handle) 'new-value))
+                        (void)))
+    (check-equal? (field-val (car (facet-fields (hash-ref (update-process-state test-facets test-state) '(1)))))
+                  'new-value)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; JSON
@@ -188,7 +259,6 @@ an association between each actor's facets and endpoints
                   (endpoint-notification '(facet1) 'field
                                          (synd:field-handle (synd:field-descriptor 'test #f))
                                          sample-srcloc))))
-
     (check-equal?
      (facets->json sample-facets)
      (list (hash 'facet_id "(facet1)"
