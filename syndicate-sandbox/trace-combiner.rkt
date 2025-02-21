@@ -14,6 +14,7 @@ an association between each actor's facets and endpoints
          racket/async-channel
          syndicate/trace
          (prefix-in synd: (submod syndicate/actor implementation-details))
+         (prefix-in synd: syndicate/core)
          json)
 
 (module+ test
@@ -59,17 +60,11 @@ an association between each actor's facets and endpoints
 ;; Dataspace ActorEnv TraceEvent -> {Values Dataspace ActorEnv}
 (define (receive-update curr-ds curr-facets pending-endpoint-evts evt)
   (cond
-    [(and (not (empty? pending-endpoint-evts))
-          (trace-notification? evt)
-          (equal? 'spawn (trace-notification-type evt)))
-     (define spawned-pid (spacetime-space (trace-notification-sink evt)))
-     (values (apply-notification curr-ds evt)
-             (apply-pending-evts curr-facets spawned-pid pending-endpoint-evts)
-             '())]
     [(trace-notification? evt)
+     (define-values (facets* pending*) (check-for-process-update curr-facets pending-endpoint-evts evt))
      (values (apply-notification curr-ds evt)
-             curr-facets
-             pending-endpoint-evts)]
+             facets*
+             pending*)]
     [(and (endpoint-notification? evt)
           (active-actor-id curr-ds))
      (values curr-ds
@@ -105,13 +100,31 @@ an association between each actor's facets and endpoints
 
 (define (add-field fct handle src)
   (struct-copy facet fct
-               [fields (cons (field handle (handle) src)
+               [fields (cons (field handle (void) src)
                              (facet-fields fct))]))
 
 (define (apply-pending-evts env pid evts)
   (for/fold ([env env])
             ([evt (in-list evts)])
     (associate-endpoint env pid evt)))
+
+;; ActorEnv (Listof EndpointNotification) TraceNotification -> {Values ActorEnv (Listof EndpointNotification)}
+(define (check-for-process-update actors pending-endpoint-evts tn)
+  (match tn
+    [(trace-notification _ who (and ty (or 'turn-begin 'turn-end 'spawn)) proc)
+     #:when (synd:actor-state? (synd:process-state proc))
+     (define pid (spacetime-space who))
+     (define-values (actors* evts*)
+       (if (equal? ty 'spawn)
+           (values (apply-pending-evts actors pid pending-endpoint-evts) '())
+           (values actors pending-endpoint-evts)))
+     (define updated-actors (hash-update actors*
+                                         pid
+                                         (curryr update-process-state (synd:process-state proc))
+                                         (hash)))
+     (values updated-actors evts*)]
+    [_
+     (values actors pending-endpoint-evts)]))
 
 ;; ActorDetail ActorState -> ActorDetail
 ;; Update the information associated with an actor's facets based on the observed state of the process
@@ -171,7 +184,8 @@ an association between each actor's facets and endpoints
                                           '()
                                           (list (endpoint '(stx:assert 'hello)
                                                           (? srcloc?)))
-                                          (== (set))))))))))
+                                          (== (set))))
+                             #:open))))))
 
   (test-case "update-process-state removes dead facets"
     (define test-facets
