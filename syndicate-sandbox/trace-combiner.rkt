@@ -23,6 +23,11 @@ an association between each actor's facets and endpoints
            syndicate/test/test-dataspace
            (prefix-in stx: "lang.rkt")))
 
+;; a CombinedNotification is one of
+;;   - (notification 'dataspace Dataspace) indicating a step in the dataspace trace
+;;   - (notification 'actors ActorEnv) indicating new information about the actors in the dataspace and their facets
+(struct notification (type detail) #:transparent)
+
 ;; an ActorEnv is a (Hashof PID ActorDetail)
 ;; an ActorDetail is a (Hashof FID FacetDetail)
 
@@ -40,21 +45,22 @@ an association between each actor's facets and endpoints
 
 ;; a TraceEvent is a TraceNotification or an EndpointNotification
 
+;; (Channelof CombinedNotification) -> TraceEventHandler
 (define (make-combined-tracer [ch (current-trace-channel)])
   (define curr-ds (dataspace (hash) #f '() '() #f))
-  (define curr-facets (hash))
+  (define curr-actors (hash))
   ;; because the actor's behavior and state are initialized BEFORE the spawn trace event, we need to keep these around
   (define pending-endpoint-evts '())
   (define (on-event evt)
-    (define-values (next-ds next-facets next-pending-evts)
-      (receive-update curr-ds curr-facets pending-endpoint-evts evt))
+    (define-values (next-ds next-actors next-pending-evts)
+      (receive-update curr-ds curr-actors pending-endpoint-evts evt))
     (set! pending-endpoint-evts next-pending-evts)
     (unless (equal? next-ds curr-ds)
-      (async-channel-put ch next-ds)
+      (async-channel-put ch (notification 'dataspace next-ds))
       (set! curr-ds next-ds))
-    (unless (equal? next-facets curr-facets)
-      (async-channel-put ch next-facets)
-      (set! curr-facets next-facets)))
+    (unless (equal? next-actors curr-actors)
+      (async-channel-put ch (notification 'actors next-actors))
+      (set! curr-actors next-actors)))
   on-event)
 
 ;; Dataspace ActorEnv TraceEvent -> {Values Dataspace ActorEnv}
@@ -177,10 +183,10 @@ an association between each actor's facets and endpoints
           (stx:spawn (stx:assert 'hello))
           (sleep 1/4)
           (define evts (channel->list test-ch))
-          (define actor-env? hash?)
-          (define env-evt (findf actor-env? evts))
+          (define actor-evt? (lambda (n) (equal? 'actors (notification-type n))))
+          (define env-evt (findf actor-evt? evts))
           (check-not-false env-evt)
-          (check-match env-evt
+          (check-match (notification-detail env-evt)
                        (hash '(2)
                              (hash '(4)
                                    (facet '(4)
