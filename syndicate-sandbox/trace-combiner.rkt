@@ -1,6 +1,8 @@
 #lang racket
 
 (provide make-combined-tracer
+         (struct-out notification)
+         notification->json
          actor-env->json)
 
 #|
@@ -14,8 +16,7 @@ an association between each actor's facets and endpoints
          racket/async-channel
          syndicate/trace
          (prefix-in synd: (submod syndicate/actor implementation-details))
-         (prefix-in synd: syndicate/core)
-         json)
+         (prefix-in synd: syndicate/core))
 
 (module+ test
   (require rackunit
@@ -234,6 +235,16 @@ an association between each actor's facets and endpoints
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; JSON
+
+;; CombinedNotification -> JSExpr
+(define (notification->json n)
+  (match n
+    [(notification 'dataspace ds)
+     (hash 'type "dataspace"
+           'detail (dataspace->json ds))]
+    [(notification 'actors env)
+     (hash 'type "actors"
+           'detail (actor-env->json env))]))
 
 ;; ActorEnv -> JSExpr
 (define (actor-env->json env)
