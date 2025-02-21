@@ -267,16 +267,16 @@ an association between each actor's facets and endpoints
 (define (field->json f)
   (hash 'name (~a (synd:field-descriptor-name (synd:field-handle-desc (field-handle f))))
         'value (~v (field-val f))
-        'location (srcloc->json (field-src f))))
+        'src (srcloc->json (field-src f))))
 
 ;; Endpoint -> JSExpr
 (define (endpoint->json e)
   (hash 'description (~a (endpoint-description e))
-        'location (srcloc->json (endpoint-src e))))
+        'src (srcloc->json (endpoint-src e))))
 
 ;; SrcLoc -> JSExpr
 (define (srcloc->json loc)
-  (hash 'source (srcloc-source loc)
+  (hash 'source (~a (srcloc-source loc))
         'line (srcloc-line loc)
         'column (srcloc-column loc)
         'position (srcloc-position loc)
@@ -297,7 +297,7 @@ an association between each actor's facets and endpoints
     (define test-endpoint (endpoint '(assert 'hello) sample-srcloc))
     (check-equal? (endpoint->json test-endpoint)
                  (hash 'description "(assert (quote hello))"
-                       'location (srcloc->json sample-srcloc))))
+                       'src (srcloc->json sample-srcloc))))
 
   (test-case "field->json converts field"
     (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
@@ -305,7 +305,7 @@ an association between each actor's facets and endpoints
     (check-equal? (field->json test-field)
                  (hash 'name "test"
                        'value "'test-val"
-                       'location (srcloc->json sample-srcloc))))
+                       'src (srcloc->json sample-srcloc))))
 
   (test-case "facet->json converts facet"
     (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
