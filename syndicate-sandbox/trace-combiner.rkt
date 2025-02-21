@@ -123,6 +123,9 @@ an association between each actor's facets and endpoints
                                          (curryr update-process-state (synd:process-state proc))
                                          (hash)))
      (values updated-actors evts*)]
+    [(trace-notification _ who 'exit _)
+     (values (hash-remove actors (spacetime-space who))
+             pending-endpoint-evts)]
     [_
      (values actors pending-endpoint-evts)]))
 
