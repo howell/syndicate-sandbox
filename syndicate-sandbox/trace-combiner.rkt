@@ -42,8 +42,6 @@ an association between each actor's facets and endpoints
 ;; an Endpoint is a (endpoint Any SrcLoc)
 (struct endpoint (description src) #:transparent)
 
-;; an EndpointDetail is a (List Symbol Any)
-
 ;; a TraceEvent is a TraceNotification or an EndpointNotification
 
 ;; (Channelof CombinedNotification) -> TraceEventHandler
