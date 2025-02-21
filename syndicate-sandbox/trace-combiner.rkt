@@ -252,58 +252,73 @@ an association between each actor's facets and endpoints
 
 ;; (Hashof FID FacetDetail) -> JSExpr
 (define (facets->json facets)
-  (for/list ([(fid endpoints) (in-hash facets)])
+  (for/list ([(fid detail) (in-hash facets)])
     (hash 'facet_id (~a fid)
-          'endpoints (map endpoint-notification->json endpoints))))
+          'detail (facet->json detail))))
+
+;; FacetDetail -> JSExpr
+(define (facet->json f)
+  (hash 'id (~a (facet-id f))
+        'fields (map field->json (facet-fields f))
+        'endpoints (map endpoint->json (facet-eps f))
+        'children (set-map (facet-children f) ~a)))
+
+;; Field -> JSExpr
+(define (field->json f)
+  (hash 'name (~a (synd:field-descriptor-name (synd:field-handle-desc (field-handle f))))
+        'value (~v (field-val f))
+        'location (srcloc->json (field-src f))))
+
+;; Endpoint -> JSExpr
+(define (endpoint->json e)
+  (hash 'description (~a (endpoint-description e))
+        'location (srcloc->json (endpoint-src e))))
+
+;; SrcLoc -> JSExpr
+(define (srcloc->json loc)
+  (hash 'source (srcloc-source loc)
+        'line (srcloc-line loc)
+        'column (srcloc-column loc)
+        'position (srcloc-position loc)
+        'span (srcloc-span loc)))
 
 (module+ test
-  (test-case "actor-env->json"
-    (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
-    (define sample-env
-      (hash '(actor1)
-            (hash '(facet1)
-                  (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)))))
+  (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
 
-    (check-equal?
-     (actor-env->json sample-env)
-     (list (hash 'actor_id "(actor1)"
-                 'facets
-                 (list (hash 'facet_id "(facet1)"
-                             'endpoints
-                             (list (hash 'facet_id "(facet1)"
-                                         'type "endpoint"
-                                         'detail "'(assert 'hello)"
-                                         'location (hash 'source "test.rkt"
-                                                         'line 1
-                                                         'column 5
-                                                         'position 50
-                                                         'span 10)))))))))
+  (test-case "srcloc->json converts source location"
+    (check-equal? (srcloc->json sample-srcloc)
+                 (hash 'source "test.rkt"
+                       'line 1
+                       'column 5
+                       'position 50
+                       'span 10)))
 
-  (test-case "facets->json"
-    (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
-    (define sample-facets
-      (hash '(facet1)
-            (list (endpoint-notification '(facet1) 'endpoint '(assert 'hello) sample-srcloc)
-                  (endpoint-notification '(facet1) 'field
-                                         (synd:field-handle (synd:field-descriptor 'test #f))
-                                         sample-srcloc))))
-    (check-equal?
-     (facets->json sample-facets)
-     (list (hash 'facet_id "(facet1)"
-                 'endpoints
-                 (list (hash 'facet_id "(facet1)"
-                             'type "endpoint"
-                             'detail "'(assert 'hello)"
-                             'location (hash 'source "test.rkt"
-                                             'line 1
-                                             'column 5
-                                             'position 50
-                                             'span 10))
-                       (hash 'facet_id "(facet1)"
-                             'type "field"
-                             'detail (hash 'field_name "test")
-                             'location (hash 'source "test.rkt"
-                                             'line 1
-                                             'column 5
-                                             'position 50
-                                             'span 10))))))))
+  (test-case "endpoint->json converts endpoint"
+    (define test-endpoint (endpoint '(assert 'hello) sample-srcloc))
+    (check-equal? (endpoint->json test-endpoint)
+                 (hash 'description "(assert (quote hello))"
+                       'location (srcloc->json sample-srcloc))))
+
+  (test-case "field->json converts field"
+    (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
+    (define test-field (field test-handle 'test-val sample-srcloc))
+    (check-equal? (field->json test-field)
+                 (hash 'name "test"
+                       'value "'test-val"
+                       'location (srcloc->json sample-srcloc))))
+
+  (test-case "facet->json converts facet"
+    (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
+    (define test-field (field test-handle 'test-val sample-srcloc))
+    (define test-endpoint (endpoint 'test-desc sample-srcloc))
+    (define test-facet
+      (facet '(1)
+             (list test-field)
+             (list test-endpoint)
+             (set '(2) '(3))))
+
+    (check-equal? (facet->json test-facet)
+                 (hash 'id "(1)"
+                       'fields (list (field->json test-field))
+                       'endpoints (list (endpoint->json test-endpoint))
+                       'children '("(3)" "(2)")))))
