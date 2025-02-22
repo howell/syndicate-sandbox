@@ -11,7 +11,6 @@ an association between each actor's facets and endpoints
 |#
 
 (require "tracing.rkt"
-         "tracing-facet-syntax.rkt"
          "dataspace-trace-integrator.rkt"
          racket/async-channel
          syndicate/trace
@@ -24,23 +23,7 @@ an association between each actor's facets and endpoints
            syndicate/test/test-dataspace
            (prefix-in stx: "lang.rkt")))
 
-;; a CombinedNotification is one of
-;;   - (notification 'dataspace Dataspace) indicating a step in the dataspace trace
-;;   - (notification 'actors ActorEnv) indicating new information about the actors in the dataspace and their facets
-(struct notification (type detail) #:transparent)
-
-;; an ActorEnv is a (Hashof PID ActorDetail)
-;; an ActorDetail is a (Hashof FID FacetDetail)
-
-;; a FacetDetail is a (facet FID (Listof Field) (Listof Endpoint) (Setof FID))
-(struct facet (id fields eps children) #:transparent)
 (define (make-facet fid) (facet fid '() '() (set)))
-
-;; a Field is a (field FieldHandle Any SrcLoc)
-(struct field (handle val src) #:transparent)
-
-;; an Endpoint is a (endpoint Any SrcLoc)
-(struct endpoint (description src) #:transparent)
 
 ;; a TraceEvent is a TraceNotification or an EndpointNotification
 

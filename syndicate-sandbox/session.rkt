@@ -7,6 +7,7 @@
          session-alive?
          kill-session
          session-eval
+         call-in-session-context
          flush-session
          session-memory-usage)
 
@@ -29,10 +30,8 @@
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
-  (define trace-chan (make-async-channel))
   (define evaluator
-    (parameterize ([current-trace-channel trace-chan]
-                   [sandbox-output std-out]
+    (parameterize ([sandbox-output std-out]
                    [sandbox-error-output err-out]
                    [sandbox-memory-limit memory-limit]
                    [sandbox-eval-limits (list DEFAULT-INTERACTION-TIME-LIMIT-S
@@ -41,14 +40,15 @@
                                                 call-with-killing-threads)]
                    [sandbox-namespace-specs (list sandbox-make-namespace
                                                   'syndicate-sandbox/tracing
-                                                  'syndicate-sandbox/tracing-facet-syntax
-                                                  'syndicate-sandbox/trace-combiner)]
+                                                  'syndicate/trie
+                                                  '(submod syndicate/actor implementation-details))]
                    [current-logger (make-logger)])
       (make-evaluator 'racket
                       #:requires (list '(submod syndicate-sandbox/session sandbox-init)
                                        'syndicate-sandbox/lang
                                        'syndicate/drivers/timestate)
                       '(void (init-session)))))
+  (define trace-chan (evaluator '(let () (local-require syndicate-sandbox/tracing) (current-trace-channel))))
   (session id evaluator std-in err-in trace-chan))
 
 (module sandbox-init racket/base
@@ -59,9 +59,10 @@
            (only-in syndicate/store with-store)
            (only-in syndicate/trace current-trace-procedures)
            racket/async-channel
-           "trace-combiner.rkt"
-           "tracing-facet-syntax.rkt")
+           "tracing.rkt"
+           "trace-combiner.rkt")
   (define (init-session)
+    (current-trace-channel (make-async-channel))
     (let ([ready-chan (make-async-channel)])
       (thread (lambda ()
                 (define receiver (make-log-receiver (current-logger)
@@ -99,6 +100,9 @@
 
 (define (session-eval s input)
   ((session-sandbox-eval s) input))
+
+(define (call-in-session-context s f)
+  (call-in-sandbox-context (session-sandbox-eval s) f))
 
 (define (flush-session s)
   (void (get-session-output s) (get-session-error-output s)))
@@ -279,6 +283,42 @@
     (check-exn exn:fail?
                (lambda () (session-eval s '(system* "echo" "hi"))))
     (check-exn #rx"`execute' access denied"
-               (lambda () (session-eval s '(system* "echo" "hi"))))))
+               (lambda () (session-eval s '(system* "echo" "hi")))))
+
+  (test-case
+      "syndicate-repl logging goes to sandbox stderr"
+    (define s (new-session))
+    (sleep 0.1)
+    (define output (get-session-error-output s))
+    (check-true (regexp-match? #rx"syndicate-repl:"
+                               output)
+                output))
+
+  (test-case
+      "receive trace events from session"
+    (define s (new-session))
+    (sleep 0.1)
+    (define evt (async-channel-try-get (session-trace-chan s)))
+    (check-true (notification? evt)))
+
+  (test-case
+      "trace events are all serializable to json"
+    (define s (new-session))
+    (session-eval s "(spawn (for ([i (in-range 3)]) (react (field [x i]) (assert (x)))))")
+    (sleep 1/4)
+    (local-require "trace-combiner.rkt")
+    (let loop ()
+      (define evt (async-channel-try-get (session-trace-chan s)))
+      (when evt
+        (check-not-exn (lambda () (notification->json evt)))
+        (loop))))
+
+  (test-case
+      "repl log doesn't cross talk between sessions"
+    (define s1 (new-session))
+    (sleep 1/10)
+    (define s2 (new-session))
+    (sleep 1/10)
+    (check-false (string-contains? (get-session-error-output s1) (get-session-error-output s2)))))
 
 

@@ -16,12 +16,12 @@
          define/query-count
 
          current-endpoint-notification-handler
+         )
 
-         (struct-out endpoint-notification))
-
-(require (prefix-in synd: syndicate/actor-lang)
+(require "tracing.rkt"
+         (prefix-in synd: syndicate/actor-lang)
          (prefix-in repl: syndicate/interactive-lang)
-         (submod syndicate/actor implementation-details)
+         (prefix-in synd: (submod syndicate/actor implementation-details))
          syntax/parse/define
          (for-syntax racket/syntax
                      racket/match
@@ -31,8 +31,6 @@
 (module+ test
   (require rackunit)
   (require syndicate/test/test-dataspace))
-
-(struct endpoint-notification (fid desc detail srcloc) #:transparent)
 
 (define-for-syntax (quote-src stx)
   (match-define (srcloc src line col pos span) (syntax-srcloc stx))
@@ -84,12 +82,6 @@
 (define-tracing-query define/query-count)
 (define-tracing-query define-field)
 
-;; The current-endpoint-notification-handler is an (Optionof {EPType Any -> Any})
-;; an EPType is one of
-;;   - 'endpoint
-;;   - 'field
-(define current-endpoint-notification-handler (make-parameter #f))
-
 (define (associate-endpoint! ep src)
   (when (current-endpoint-notification-handler)
     ((current-endpoint-notification-handler) (endpoint-notification (synd:current-facet-id)
@@ -127,14 +119,14 @@
         (check-true (asserted? 'toast))
         (check-match store
                      (list (endpoint-notification (? list?) 'endpoint (== '(assert (breakfast))) (? srcloc?))
-                           (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'breakfast _)) (? srcloc?)))))))
+                           (endpoint-notification (? list?) 'field (synd:field-handle (synd:field-descriptor 'breakfast _)) (? srcloc?)))))))
 
   (test-case "simple query definition"
     (with-recording-handler store
       (with-test-dataspace [(synd:spawn (define/query-set brekkers (list 'breakfast $v) v))]
         (check-true (asserted? (synd:observe (list 'breakfast synd:?))))
         (check-match store
-                     (list (endpoint-notification (? list?) 'field (field-handle (field-descriptor 'brekkers _)) (? srcloc?)))))))
+                     (list (endpoint-notification (? list?) 'field (synd:field-handle (synd:field-descriptor 'brekkers _)) (? srcloc?)))))))
 
   (test-case "assert still works with repl"
     (with-recording-handler store

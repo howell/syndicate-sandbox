@@ -143,7 +143,7 @@
    (lambda ()
      (define stdout-evt (push-output id (session-std-output s) 'stdout))
      (define stderr-evt (push-output id (session-error-output s) 'stderr))
-     (define trace-evt (push-trace-evt id (session-trace-chan s)))
+     (define trace-evt (push-trace-evt s))
      (let loop ()
        (define timeout-evt (wait-for id))
        (when (sync stdout-evt stderr-evt trace-evt timeout-evt)
@@ -163,13 +163,15 @@
                      (not (eof-object? out))))))
 
 (define TRACE-TYPE 'trace)
-(define (push-trace-evt id trace-chan)
-  (handle-evt trace-chan
+(define (push-trace-evt s)
+  (define id (session-id s))
+  (handle-evt (session-trace-chan s)
               (lambda (evt)
+                (define json (notification->json evt) #;(call-in-session-context s (lambda () (notification->json evt))))
                 (define seq-no (next-seq-no! id TRACE-TYPE))
                 (log-sandbox-server-info "~a: Sending session ~a trace step ~a" (timestamp) id seq-no)
                 (define url (format "/api/sessions/~a/output" id))
-                (define msg (hash 'type (~a TRACE-TYPE) 'data (notification->json evt) 'seq_no seq-no))
+                (define msg (hash 'type (~a TRACE-TYPE) 'data json 'seq_no seq-no))
                 (post-http! url msg))))
 
 (define (next-seq-no! id type)

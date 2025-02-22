@@ -20,23 +20,7 @@
   (require rackunit)
   (require syndicate/tset))
 
-;; an Actor is a (actor Name Trie (Listof Event))
-(struct actor (name assertions) #:transparent)
 (define (new-actor name) (actor name trie-empty))
-
-;; a PendingAction is a (pending SpaceTime (Listof Action))
-(struct pending (origin acts) #:transparent)
-
-;; an ActiveActor is a (List ActorPath Event (Option (Listof Action)))
-;; represents an actor's current turn state: who, what event, and what actions produced
-
-;; a Dataspace is a
-;; (dataspace (Hashof ActorPath Actor)
-;;            (Optionof (List ActorPath Event (Optionof (Listof Action))))
-;;            (Listof Any)
-;;            (Listof PendingAction)
-;;            (Optionof Symbol))
-(struct dataspace (actors active recent-messages pending-acts last-op) #:transparent)
 
 (define (make-trace-integrator [ch (current-trace-channel)] #:max-messages [max-msgs 5])
   (define curr-ds (dataspace (hash) #f '() '() #f))
