@@ -140,20 +140,20 @@ an association between each actor's facets and endpoints
   (define live-facets (synd:actor-state-facets as))
   (define field-table (synd:actor-state-field-table as))
 
-  (define pruned-facets
-    (for/hash ([(fid fct) (in-hash facets)]
-               #:when (hash-has-key? live-facets fid))
-      (values fid fct)))
+  (define facets-with-new
+    (for/hash ([(fid live-facet) (in-hash live-facets)])
+      (define existing-info (hash-ref facets fid (lambda () (make-facet fid))))
+      (define with-children (struct-copy facet existing-info
+                                         [children (synd:facet-children live-facet)]))
+      (values fid
+              with-children)))
 
-  (for/hash ([(fid fct) (in-hash pruned-facets)])
+  ;; Update all facets with current field values
+  (for/hash ([(fid fct) (in-hash facets-with-new)])
     (values fid
-            (let* ([live-facet (hash-ref live-facets fid)]
-                   [with-children (struct-copy facet fct
-                                               [children (synd:facet-children live-facet)])]
-                   [with-fields (struct-copy facet with-children
-                                             [fields (update-field-values (facet-fields fct)
-                                                                          field-table)])])
-              with-fields))))
+            (struct-copy facet fct
+                         [fields (update-field-values (facet-fields fct)
+                                                      field-table)]))))
 
 ;; (Listof Field) FieldTable -> (Listof Field)
 ;; Update field values from the current field table
@@ -229,7 +229,19 @@ an association between each actor's facets and endpoints
                               (make-ephemeron (synd:field-handle-desc test-handle) 'new-value))
                         (void)))
     (check-equal? (field-val (car (facet-fields (hash-ref (update-process-state test-facets test-state) '(1)))))
-                  'new-value)))
+                  'new-value))
+
+  (test-case "update-process-state adds new facets from actor state"
+    (define test-facets (hash))
+    (define test-state
+      (synd:actor-state (void)
+                        (hash '(1) (synd:facet '(1) (hash) '() (set '(2) '(3)) #f #f)
+                              '(2) (synd:facet '(2) (hash) '() (set) #f #f))
+                        (void) (void) (hash) (void)))
+    (define result (update-process-state test-facets test-state))
+    (check-equal? (hash-keys result) '((1) (2)))
+    (check-equal? (facet-children (hash-ref result '(1))) (set '(2) '(3)))
+    (check-equal? (facet-children (hash-ref result '(2))) (set))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; JSON
