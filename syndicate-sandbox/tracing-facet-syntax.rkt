@@ -1,6 +1,7 @@
 #lang racket
 
 (provide assert
+         on
          on-stop
          begin/dataflow
          stop-when
@@ -54,6 +55,7 @@
 (define-tracing-endpoint assert repl:assert)
 
 (define-tracing-endpoints
+  on
   on-stop
   begin/dataflow
   stop-when

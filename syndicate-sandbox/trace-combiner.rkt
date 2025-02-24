@@ -224,7 +224,50 @@ an association between each actor's facets and endpoints
     (define result (update-process-state test-facets test-state))
     (check-equal? (hash-keys result) '((1) (2)))
     (check-equal? (facet-children (hash-ref result '(1))) (set '(2) '(3)))
-    (check-equal? (facet-children (hash-ref result '(2))) (set))))
+    (check-equal? (facet-children (hash-ref result '(2))) (set)))
+
+  (test-case "bank account example captures field value and both endpoints"
+    (struct account (balance) #:prefab)
+    (struct deposit (amount) #:prefab)
+    (define test-ch (make-async-channel))
+    (define on-evt (make-combined-tracer test-ch))
+    (parameterize ([current-endpoint-notification-handler on-evt])
+      (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
+        (with-test-dataspace [(stx:spawn #:name 'banker
+                                     (stx:field [balance 0])
+                                     (stx:assert (account (balance)))
+                                     (stx:on (stx:message (deposit $amount))
+                                             (balance (+ (balance) amount))))]
+          (check-true (asserted? (account 0)))
+          (define evts (channel->list test-ch))
+          (define final-actors
+            (for/last ([evt (in-list evts)]
+                       #:when (equal? 'actors (notification-type evt)))
+              (notification-detail evt)))
+          (define final-ds
+            (for/last ([evt (in-list evts)]
+                       #:when (equal? 'dataspace (notification-type evt)))
+              (notification-detail evt)))
+          (check-not-false final-actors)
+          (check-not-false final-ds)
+          (define banker-pid
+            (for/first ([(pid act) (in-hash (dataspace-actors final-ds))]
+                        #:when (equal? 'banker (actor-name act)))
+              pid))
+          (check-not-false banker-pid)
+          (check-true (hash-has-key? final-actors banker-pid))
+          (define banker-detail (hash-ref final-actors banker-pid))
+          (check-equal? (hash-count banker-detail) 1)
+          (match-define (list banker-root) (hash-values banker-detail))
+          (check-match (facet-fields banker-root)
+                       (list (field _ 0 _)))
+          (check-equal? (length (facet-eps banker-root)) 2)
+          (check-match (facet-eps banker-root)
+                       (list-no-order (endpoint '(stx:assert (account (balance)))
+                                                _)
+                                      (endpoint '(stx:on (stx:message (deposit $amount))
+                                                         (balance (+ (balance) amount)))
+                                                _))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; JSON

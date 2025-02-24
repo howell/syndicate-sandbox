@@ -5,6 +5,7 @@
 
 (require (only-in "tracing-facet-syntax.rkt"
                   assert
+                  on
                   on-stop
                   begin/dataflow
                   stop-when
@@ -22,6 +23,7 @@
 (require (except-in syndicate/interactive-lang
                     #%module-begin
                     assert
+                    on
                     on-stop
                     begin/dataflow
                     stop-when
