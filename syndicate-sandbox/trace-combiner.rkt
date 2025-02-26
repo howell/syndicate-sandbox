@@ -53,11 +53,6 @@ an association between each actor's facets and endpoints
      (values (apply-notification curr-ds evt)
              facets*
              pending*)]
-    [(and (endpoint-notification? evt)
-          (active-actor-id curr-ds))
-     (values curr-ds
-             (associate-endpoint curr-facets (active-actor-id curr-ds) evt)
-             pending-endpoint-evts)]
     [else
      (values curr-ds curr-facets (cons evt pending-endpoint-evts))]))
 
@@ -65,10 +60,11 @@ an association between each actor's facets and endpoints
 (define (associate-endpoint env pid evt)
   (define fid (endpoint-notification-fid evt))
   (define (update-actor existing-facets)
-    (hash-update existing-facets
-                 fid
-                 (lambda (fct) (add-notification fct evt))
-                 (lambda () (make-facet fid))))
+    (if (hash-has-key? existing-facets fid)
+        (hash-update existing-facets
+                     fid
+                     (lambda (fct) (add-notification fct evt)))
+        existing-facets))
   (hash-update env pid update-actor (hash)))
 
 ;; Facet EndpointNotification -> Facet
@@ -102,15 +98,23 @@ an association between each actor's facets and endpoints
     [(trace-notification _ who (and ty (or 'turn-begin 'turn-end 'spawn)) proc)
      #:when (synd:actor-state? (synd:process-state proc))
      (define pid (spacetime-space who))
-     (define-values (actors* evts*)
-       (if (equal? ty 'spawn)
-           (values (apply-pending-evts actors pid pending-endpoint-evts) '())
-           (values actors pending-endpoint-evts)))
-     (define updated-actors (hash-update actors*
-                                         pid
-                                         (curryr update-process-state (synd:process-state proc))
-                                         (hash)))
-     (values updated-actors evts*)]
+
+     (define actors* (hash-update actors
+                                  pid
+                                  (curryr update-process-state (synd:process-state proc))
+                                  (hash)))
+
+     (define this-actor (hash-ref actors* pid))
+
+     ;; Find endpoint notifications that match facet IDs in this actor
+     (define-values (matching-evts other-evts)
+       (partition (lambda (evt)
+                    (and (endpoint-notification? evt)
+                         (hash-has-key? this-actor (endpoint-notification-fid evt))))
+                  pending-endpoint-evts))
+
+     (values (apply-pending-evts actors* pid matching-evts)
+             other-evts)]
     [(trace-notification _ who 'exit _)
      (values (hash-remove actors (spacetime-space who))
              pending-endpoint-evts)]
@@ -233,11 +237,12 @@ an association between each actor's facets and endpoints
     (define on-evt (make-combined-tracer test-ch))
     (parameterize ([current-endpoint-notification-handler on-evt])
       (with-store [(current-trace-procedures (current-trace-procedures (cons on-evt (current-trace-procedures))))]
-        (with-test-dataspace [(stx:spawn #:name 'banker
-                                     (stx:field [balance 0])
-                                     (stx:assert (account (balance)))
-                                     (stx:on (stx:message (deposit $amount))
-                                             (balance (+ (balance) amount))))]
+        (with-test-dataspace []
+          (stx:spawn #:name 'banker
+                     (stx:field [balance 0])
+                     (stx:assert (account (balance)))
+                     (stx:on (stx:message (deposit $amount))
+                             (balance (+ (balance) amount))))
           (check-true (asserted? (account 0)))
           (define evts (channel->list test-ch))
           (define final-actors
@@ -255,6 +260,7 @@ an association between each actor's facets and endpoints
                         #:when (equal? 'banker (actor-name act)))
               pid))
           (check-not-false banker-pid)
+          (check-match banker-pid (list (? (curry <= 2))))
           (check-true (hash-has-key? final-actors banker-pid))
           (define banker-detail (hash-ref final-actors banker-pid))
           (check-equal? (hash-count banker-detail) 1)
