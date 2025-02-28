@@ -19,6 +19,7 @@ an association between each actor's facets and endpoints
 
 (module+ test
   (require rackunit
+           "utils.rkt"
            syndicate/store
            syndicate/test/test-dataspace
            (prefix-in stx: "lang.rkt")))
@@ -153,12 +154,6 @@ an association between each actor's facets and endpoints
                                  (lambda () (field-val f))))])))
 
 (module+ test
-  (define (channel->list ch)
-    (define r (async-channel-try-get ch))
-    (if r
-        (cons r (channel->list ch))
-        '()))
-
   (test-case "pending endpoint events are applied to spawned actor"
     (define test-ch (make-async-channel))
     (define on-evt (make-combined-tracer test-ch))
