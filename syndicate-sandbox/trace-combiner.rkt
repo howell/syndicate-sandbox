@@ -57,41 +57,41 @@ an association between each actor's facets and endpoints
     [else
      (values curr-ds curr-facets (cons evt pending-endpoint-evts))]))
 
-;; ActorEnv PID EndpointNotification -> ActorEnv
-(define (associate-endpoint env pid evt)
+;; ActorEnv PID ActorState EndpointNotification -> ActorEnv
+(define (associate-endpoint env pid proc-state evt)
   (define fid (endpoint-notification-fid evt))
   (define (update-actor existing-facets)
     (if (hash-has-key? existing-facets fid)
         (hash-update existing-facets
                      fid
-                     (lambda (fct) (add-notification fct evt)))
+                     (lambda (fct) (add-notification fct proc-state evt)))
         existing-facets))
   (hash-update env pid update-actor (hash)))
 
-;; Facet EndpointNotification -> Facet
-(define (add-notification fct evt)
-  (define adder
-    (case (endpoint-notification-desc evt)
-      [(endpoint) add-ep]
-      [(field) add-field]))
-  (adder fct
-         (endpoint-notification-detail evt)
-         (endpoint-notification-srcloc evt)))
+;; Facet ActorState EndpointNotification -> Facet
+(define (add-notification fct proc-state evt)
+  (define detail (endpoint-notification-detail evt))
+  (define src (endpoint-notification-srcloc evt))
+  (case (endpoint-notification-desc evt)
+    [(endpoint)
+     (add-ep fct detail src)]
+    [(field)
+     (add-field fct proc-state detail src)]))
 
 (define (add-ep fct desc src)
   (struct-copy facet fct
                [eps (cons (endpoint desc src)
                           (facet-eps fct))]))
 
-(define (add-field fct handle src)
+(define (add-field fct proc-state handle src)
   (struct-copy facet fct
-               [fields (cons (field handle (void) src)
+               [fields (cons (field handle (read-field handle (synd:actor-state-field-table proc-state)) src)
                              (facet-fields fct))]))
 
-(define (apply-pending-evts env pid evts)
+(define (apply-pending-evts env pid proc-state evts)
   (for/fold ([env env])
             ([evt (in-list evts)])
-    (associate-endpoint env pid evt)))
+    (associate-endpoint env pid proc-state evt)))
 
 ;; ActorEnv (Listof EndpointNotification) TraceNotification -> {Values ActorEnv (Listof EndpointNotification)}
 (define (check-for-process-update actors pending-endpoint-evts tn)
@@ -99,10 +99,11 @@ an association between each actor's facets and endpoints
     [(trace-notification _ who (and ty (or 'turn-begin 'turn-end 'spawn)) proc)
      #:when (synd:actor-state? (synd:process-state proc))
      (define pid (spacetime-space who))
+     (define proc-state (synd:process-state proc))
 
      (define actors* (hash-update actors
                                   pid
-                                  (curryr update-process-state (synd:process-state proc))
+                                  (curryr update-process-state proc-state)
                                   (hash)))
 
      (define this-actor (hash-ref actors* pid))
@@ -114,7 +115,7 @@ an association between each actor's facets and endpoints
                          (hash-has-key? this-actor (endpoint-notification-fid evt))))
                   pending-endpoint-evts))
 
-     (values (apply-pending-evts actors* pid matching-evts)
+     (values (apply-pending-evts actors* pid proc-state matching-evts)
              other-evts)]
     [(trace-notification _ who 'exit _)
      (values (hash-remove actors (spacetime-space who))
@@ -148,10 +149,14 @@ an association between each actor's facets and endpoints
 (define (update-field-values fields table)
   (for/list ([f (in-list fields)])
     (struct-copy field f
-                 [val (ephemeron-value
-                       (hash-ref table
-                                 (synd:field-handle-desc (field-handle f))
-                                 (lambda () (field-val f))))])))
+                 [val (read-field (field-handle f) table)])))
+
+;; FieldHandle FieldTable -> Any
+(define (read-field fh table)
+  (ephemeron-value
+   (hash-ref table
+             (synd:field-handle-desc fh)
+             void)))
 
 (module+ test
   (test-case "pending endpoint events are applied to spawned actor"
