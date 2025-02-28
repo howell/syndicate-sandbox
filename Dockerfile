@@ -1,5 +1,5 @@
 # Use an official Racket image as the base
-FROM racket/racket:8.9-full
+FROM racket/racket:8.15-full
 
 # Set the working directory inside the container
 WORKDIR /app
