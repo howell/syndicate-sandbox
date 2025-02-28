@@ -17,8 +17,13 @@
          json)
 
 (module+ test
-  (require rackunit)
-  (require syndicate/tset))
+  (require rackunit
+           "utils.rkt"
+           syndicate/tset
+           syndicate/store
+           syndicate/ground
+           (prefix-in synd: syndicate/actor-lang)
+           syndicate/test/test-dataspace))
 
 (define (new-actor name) (actor name trie-empty))
 
@@ -106,6 +111,14 @@
         (patch-relabel a (const DEFAULT-LABEL))
         a)))
 
+(define (patch-subset? p1 p2)
+  (and (trie-subset? (patch-added p1) (patch-added p2))
+       (trie-subset? (patch-removed p1) (patch-removed p2))))
+
+(define (trie-subset? t1 t2)
+  (or (equal? t1 t2)
+      (trie-empty? (trie-subtract t1 t2))))
+
 ;; Dataspace (U Action {Action -> Bool} SpaceTime -> Dataspace
 (define (remove-action ds action source)
   (define target (findf (lambda (act) (equal? source (pending-origin act)))
@@ -113,9 +126,12 @@
   (match target
     [#f ds]
     [(pending _ acts)
-     (define finder (if (procedure? action)
-                        (lambda (_ other) (action other))
-                        (lambda (_ other) (equal? other action))))
+     (define finder
+       (cond
+         [(procedure? action) (lambda (_ other) (action other))]
+         [(patch? action) (lambda (_ other) (and (patch? other)
+                                                 (patch-subset? action other)))]
+         [else (lambda (_ other) (equal? other action))]))
      (define other-acts (remove action acts finder))
      (define next-acts
        (cond
@@ -186,7 +202,33 @@
                     (pending (spacetime 'actor1 12) (list 'action1))
                     (pending (spacetime 'actor3 43) (list 'action3)))
                    'op)
-                  "Should only modify the targeted list of actions")))
+                  "Should only modify the targeted list of actions"))
+
+  (test-case "remove action with inexact patch"
+    ;; It's possible for an interpreted patch to not exactly match the one produced by an actor,
+    ;; e.g. an assertion that the actor already has. Test that those patches are properly removed.
+    (synd:assertion-struct active ())
+    (synd:message-struct toggle ())
+    (define action-source (spacetime '(0) 176))
+    (define existing-assertions (trie (observe (toggle)) DEFAULT-LABEL))
+    (define pending-action (patch (trie (active) DEFAULT-LABEL
+                                        (observe (toggle)) DEFAULT-LABEL)
+                                  trie-empty))
+    (define the-ds (dataspace
+                    (hash '(0) (actor 'flip-flop existing-assertions)
+                          '(1) (actor #f (trie (observe (observe (toggle))) DEFAULT-LABEL)))
+                    #f
+                    '()
+                    (list (pending action-source
+                                   (list pending-action)))
+                    'actions-interpreted))
+    (define interpreted-action (patch (trie (active) (datum-tset 0))
+                                      trie-empty))
+    (define interpreted/relabeled (first (label-actions (list interpreted-action))))
+    (define result-ds (remove-action the-ds interpreted/relabeled action-source))
+    (check-true (patch-subset? interpreted/relabeled pending-action))
+    (check-equal? (dataspace-pending-acts result-ds)
+                  '())))
 
 ;; Actor Patch -> Actor
 ;; Update an actor's assertions by applying the patch
@@ -391,8 +433,6 @@
                [actors (hash-remove (dataspace-actors ds) who)]))
 
 (module+ test
-  (require syndicate/store
-           syndicate/ground)
 
   (define (run/record boot-acts)
     (define evts/rev '())
@@ -420,7 +460,8 @@
     (check-false (dataspace-active final-ds))
     (check-equal? (length (dataspace-recent-messages final-ds))
                   2)
-    (check-true (empty? (dataspace-pending-acts final-ds))))
+    (check-equal? (dataspace-pending-acts final-ds)
+                  '()))
 
   (test-case "removing actions regression"
     (define the-action (patch (trie '#s(account 0) DEFAULT-LABEL
@@ -554,4 +595,29 @@
                          (run/record (activate!))))
     (define final-ds (consume-trace repl-trace))
     (check-match (dataspace-pending-acts final-ds)
-                 (list (pending _ (list (? synd:quit-dataspace?)))))))
+                 (list (pending _ (list (? synd:quit-dataspace?))))))
+
+  (test-case "regression: removing actions on flip-flop example"
+    (synd:assertion-struct active ())
+    (synd:message-struct toggle ())
+    (define receive-event (make-trace-integrator))
+    (with-store [(current-trace-procedures (list receive-event))]
+      (run-ground
+       (synd:spawn* #:name 'flip-flop
+                    (define (active-state)
+                      (displayln 'active)
+                      (synd:react (synd:assert (active))
+                                  (synd:stop-when (synd:message (toggle))
+                                                  (inactive-state))))
+                    (define (inactive-state)
+                      (displayln 'inactive)
+                      (synd:react (synd:stop-when (synd:message (toggle))
+                                                  (active-state))))
+                    (inactive-state))
+       (synd:spawn (synd:on (synd:asserted (synd:observe (toggle)))
+                            (synd:send! (toggle))))))
+    (sleep 1/5)
+    (define final-ds (last (channel->list (current-trace-channel))))
+    (check-true (dataspace? final-ds))
+    (check-equal? (dataspace-pending-acts final-ds)
+                  '())))
