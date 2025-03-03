@@ -40,9 +40,9 @@
 
 (define-syntax-parse-rule (define-tracing-endpoint nm:id (~optional nm-:id))
   #:with synd-name (or (attribute nm-) (format-id #'nm "synd:~a" #'nm))
-  #:with src (quote-src this-syntax)
   (define-syntax-parse-rule (nm . body)
     #:with the-ep this-syntax
+    #:with src (quote-src this-syntax)
     (begin
       (associate-endpoint! 'the-ep src)
       (synd-name . body))))
@@ -71,8 +71,8 @@
 
 (define-syntax-parse-rule (define-tracing-query nm:id)
   #:with synd-name (format-id #'nm "synd:~a" #'nm)
-  #:with src (quote-src this-syntax)
   (define-syntax-parse-rule (nm field-nm:id . body)
+    #:with src (quote-src this-syntax)
     (begin
       (synd-name field-nm . body)
       (associate-field! field-nm src))))
@@ -99,12 +99,14 @@
                                                           src))))
 
 (module+ test
+  (require racket/port)
+
   (define-syntax-parse-rule (with-recording-handler store:id body ...+)
     (let ([store '()])
       (parameterize ([current-endpoint-notification-handler (lambda (evt)
-                                                    (printf "Endpoint Event: ~a\n" evt)
-                                                    (set! store (cons evt
-                                                                      store)))])
+                                                              (printf "Endpoint Event: ~a\n" evt)
+                                                              (set! store (cons evt
+                                                                                store)))])
         body ...)))
 
   (test-case "assert associates endpoint and facet"
@@ -136,6 +138,20 @@
         (assert 'momma)
         (check-true (asserted? 'momma))
         (check-match store
-                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) (? srcloc?))))))))
+                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) (? srcloc?)))))))
 
-
+  (test-case "srcloc corresponds to use site and contains correct source"
+    (with-recording-handler store
+      (with-test-dataspace [(synd:spawn (assert 'test-value))]
+        (check-true (asserted? 'test-value))
+        (match store
+          [(list (endpoint-notification _facet-id 'endpoint _expr (srcloc src _line _col pos span)))
+           ;; Try to read the source file and verify the content
+           (when (and src (file-exists? src))
+             (define file-content
+               (parameterize ([port-count-lines-enabled #t])
+               (call-with-input-file src
+                 (λ (in)
+                   (file-position in (sub1 pos))
+                   (read-string span in)))))
+             (check-match file-content (regexp #rx"assert.*'test-value")))])))))
