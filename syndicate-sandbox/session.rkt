@@ -16,7 +16,8 @@
          racket/async-channel)
 
 (module+ test
-  (require rackunit))
+  (require rackunit
+           "utils.rkt"))
 
 (define PIPE-BUFFER-SIZE (* 64 1024))
 (define DEFAULT-SANDBOX-MEMORY-LIMIT-MB 30)
@@ -98,8 +99,19 @@
 (define (session-alive? s)
   (evaluator-alive? (session-sandbox-eval s)))
 
-(define (session-eval s input)
-  ((session-sandbox-eval s) input))
+(define (session-eval s input [source-name #f])
+  (define unique-source-name
+    (or source-name
+        (format "session-eval-~a-~a"
+                (session-id s)
+                (current-inexact-milliseconds))))
+
+  (define input-string (if (string? input) input (format "~s" input)))
+  (with-input-from-string input-string
+    (lambda ()
+      (port-count-lines! (current-input-port))
+      (define stx (read-syntax unique-source-name))
+      ((session-sandbox-eval s) stx))))
 
 (define (call-in-session-context s f)
   (call-in-sandbox-context (session-sandbox-eval s) f))
@@ -319,6 +331,22 @@
     (sleep 1/10)
     (define s2 (new-session))
     (sleep 1/10)
-    (check-false (string-contains? (get-session-error-output s1) (get-session-error-output s2)))))
+    (check-false (string-contains? (get-session-error-output s1) (get-session-error-output s2))))
 
-
+  (test-case
+      "source locations reflect different session interactions"
+    (define s1 (new-session))
+    (session-eval s1 "(spawn (assert 'hello))" "source-1")
+    (session-eval s1 "(spawn (assert 'hello))" "source-2")
+    (sleep 1/10)
+    (define actors (notification-detail (last (filter actors-notification? (channel->list (session-trace-chan s1))))))
+    (define srclocs
+      (for*/list ([actor-detail (in-hash-values actors)]
+                  [facet-detail (in-hash-values actor-detail)]
+                  [ep (in-list (facet-eps facet-detail))])
+        (endpoint-src ep)))
+    (check-equal? (length srclocs) 2)
+    (check-not-equal? (first srclocs)
+                      (second srclocs))
+    (check-equal? (list->set (map srcloc-source srclocs))
+                  (set "source-1" "source-2"))))
