@@ -16,6 +16,14 @@
 ;;   - (notification 'actors ActorEnv) indicating new information about the actors in the dataspace and their facets
 (struct notification (type detail) #:transparent)
 
+(define (dataspace-notification? v)
+  (and (notification? v)
+       (equal? 'dataspace (notification-type v))))
+
+(define (actors-notification? v)
+  (and (notification? v)
+       (equal? 'actors (notification-type v))))
+
 ;; a Dataspace is a
 ;; (dataspace (Hashof ActorPath Actor)
 ;;            (Optionof (List ActorPath Event (Optionof (Listof Action))))
