@@ -6,7 +6,6 @@
 
 (require "session.rkt"
          "trace-combiner.rkt"
-         "dataspace-trace-integrator.rkt"
          racket/date
          net/url
          json
@@ -18,7 +17,13 @@
 
 (define-logger sandbox-server)
 
-(struct active-session (session last-activity next-seq-nos) #:transparent)
+(struct active-session (session
+                        last-activity
+                        next-seq-nos
+                        output-buffer
+                        buffer-needs-flush?
+                        buffer-last-flush)
+  #:transparent)
 
 (define session-envs (make-hash))
 
@@ -35,7 +40,10 @@
                                              (current-inexact-milliseconds)
                                              (hash 'stdout 0
                                                    'stderr 0
-                                                   TRACE-TYPE 0)))
+                                                   TRACE-TYPE 0)
+                                             (hash)
+                                             #f
+                                             (current-inexact-milliseconds)))
   (service-session s))
 
 (define (evaluate-code id code)
@@ -137,6 +145,8 @@
 (define IDLE-TIMEOUT-MINS 10)
 (define IDLE-TIMEOUT-MILLIS (* IDLE-TIMEOUT-MINS 60 1000))
 
+(define BUFFER-FLUSH-DELAY 100) ; milliseconds to wait before flushing buffer
+
 (define (service-session s)
   (define id (session-id s))
   (thread
@@ -146,33 +156,84 @@
      (define trace-evt (push-trace-evt s))
      (let loop ()
        (define timeout-evt (wait-for id))
-       (when (sync stdout-evt stderr-evt trace-evt timeout-evt)
+       (define flush-evt (check-flush-buffer id))
+       (when (sync stdout-evt stderr-evt trace-evt timeout-evt flush-evt)
          (loop)))
      (log-sandbox-server-info "~a: Service thread for session ~a terminating" (timestamp) id))))
+
+(define (check-flush-buffer id)
+  (define the-session (hash-ref session-envs id #f))
+  (cond
+    [(and the-session
+          (active-session-buffer-needs-flush? the-session))
+     (define deadline (+ (active-session-buffer-last-flush the-session) BUFFER-FLUSH-DELAY))
+     (handle-evt (alarm-evt deadline)
+                 (lambda (_e) (flush-buffer! id)))]
+    [else
+     never-evt]))
+
+(define (buffer-output! id type data)
+  (define the-session (hash-ref session-envs id #f))
+  (when the-session
+    (define buffer (active-session-output-buffer the-session))
+    (define seq-no (next-seq-no! id type))
+
+    (define next-buffer (hash-update buffer
+                                     type
+                                     (lambda (existing)
+                                       (append existing (list (cons seq-no data))))
+                                     '()))
+
+    (hash-set! session-envs
+              id
+              (struct-copy active-session (hash-ref session-envs id)
+                           [output-buffer next-buffer]
+                           [buffer-needs-flush? #t]))))
+
+(define (flush-buffer! id)
+  (define the-session (hash-ref session-envs id #f))
+  (when the-session
+    (define buffer (active-session-output-buffer the-session))
+
+    ; Only send if there's data
+    (unless (hash-empty? buffer)
+      (log-sandbox-server-info "~a: Flushing output buffer for session ~a" (timestamp) id)
+
+      ; Create a batch message with all buffered outputs
+      (define batch-data
+        (for/list ([(type entries) (in-hash buffer)])
+          (hash 'type (~a type)
+                'entries (for/list ([entry (in-list entries)])
+                           (hash 'seq_no (car entry)
+                                 'data (cdr entry))))))
+
+      ; Send the batch
+      (define url (format "/api/sessions/~a/output" id))
+      (post-http! url (hash 'outputs batch-data)))
+
+    (hash-set! session-envs
+               id
+               (struct-copy active-session the-session
+                            [output-buffer (hash)]
+                            [buffer-needs-flush? #f]
+                            [buffer-last-flush (current-inexact-milliseconds)]))))
 
 (define (push-output id port type)
   (handle-evt port
               (lambda (_p)
                 (log-sandbox-server-info "~a: Reading output from ~a for session ~a" (timestamp) type id)
                 (define out (read-string (pipe-content-length port) port))
-                (define seq-no (next-seq-no! id type))
-                (log-sandbox-server-info "~a: Sending session ~a output ~a on ~a" (timestamp) id seq-no type)
-                (define url (format "/api/sessions/~a/output" id))
-                (define msg (hash 'type (~a type) 'data out 'seq_no seq-no))
-                (and (post-http! url msg)
-                     (not (eof-object? out))))))
+                (buffer-output! id type out)
+                (not (eof-object? out)))))
 
 (define TRACE-TYPE 'trace)
 (define (push-trace-evt s)
   (define id (session-id s))
   (handle-evt (session-trace-chan s)
               (lambda (evt)
-                (define json (notification->json evt) #;(call-in-session-context s (lambda () (notification->json evt))))
-                (define seq-no (next-seq-no! id TRACE-TYPE))
-                (log-sandbox-server-info "~a: Sending session ~a trace step ~a" (timestamp) id seq-no)
-                (define url (format "/api/sessions/~a/output" id))
-                (define msg (hash 'type (~a TRACE-TYPE) 'data json 'seq_no seq-no))
-                (post-http! url msg))))
+                (define json (notification->json evt))
+                (buffer-output! id TRACE-TYPE json)
+                #t)))
 
 (define (next-seq-no! id type)
   (define the-session (hash-ref session-envs id))
@@ -225,6 +286,8 @@
 (define (terminate! id)
   (define the-session (hash-ref session-envs id #f))
   (when the-session
+    (when (active-session-buffer-needs-flush? the-session)
+      (flush-buffer! id)) ; Flush any remaining buffered output
     (kill-session (active-session-session the-session))))
 
 (define (notify-idle! id)
