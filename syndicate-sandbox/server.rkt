@@ -46,14 +46,14 @@
                                              (current-inexact-milliseconds)))
   (service-session s))
 
-(define (evaluate-code id code)
+(define (evaluate-code id code [source-name #f])
   (define s (hash-ref session-envs id #f))
   (if s
       (with-handlers ([exn:fail?
                        (λ (e) (format "Error: ~a" (exn-message e)))])
         (begin
           (mark-activity! s)
-          (let ([result (session-eval (active-session-session s) code)])
+          (let ([result (session-eval (active-session-session s) code source-name)])
             (if (void? result)
                 ""
                 (~v result)))))
@@ -80,7 +80,8 @@
   (log-sandbox-server-info "~a: Received code submission request with body ~a" (timestamp) msg)
   (define id (hash-ref msg 'session_id))
   (define code (hash-ref msg 'code))
-  (response/jsexpr (hash 'status "ok" 'result (evaluate-code id code))))
+  (define source-name (hash-ref msg 'source_name (format "session-~a-unnamed" id)))
+  (response/jsexpr (hash 'status "ok" 'result (evaluate-code id code source-name))))
 
 (define (handle-keep-alive req)
   (define msg (bytes->jsexpr (request-post-data/raw req)))

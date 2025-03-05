@@ -24,13 +24,16 @@
 (define DEFAULT-INTERACTION-MEMORY-LIMIT-MB 4)
 (define DEFAULT-INTERACTION-TIME-LIMIT-S 1)
 
-;; a Session is a (session ID Procedure InputPort InputPort AsyncChannel)
-(struct session (id sandbox-eval std-output error-output trace-chan) #:transparent)
+;; a Session is a (session ID Procedure InputPort InputPort AsyncChannel Box)
+(struct session (id sandbox-eval std-output error-output trace-chan source-name-box) #:transparent)
 
 (define (new-session #:id [id #f] #:memory [memory-limit DEFAULT-SANDBOX-MEMORY-LIMIT-MB])
   (set! id (or id (gensym 'session)))
   (define-values (std-in std-out) (make-pipe PIPE-BUFFER-SIZE))
   (define-values (err-in err-out) (make-pipe PIPE-BUFFER-SIZE))
+
+  (define source-name-box (box (format "session-~a" id)))
+
   (define evaluator
     (parameterize ([sandbox-output std-out]
                    [sandbox-error-output err-out]
@@ -39,6 +42,7 @@
                                               DEFAULT-INTERACTION-MEMORY-LIMIT-MB)]
                    [sandbox-eval-handlers (list #f
                                                 call-with-killing-threads)]
+                   [sandbox-reader (make-sandbox-reader source-name-box)]
                    [sandbox-namespace-specs (list sandbox-make-namespace
                                                   'syndicate-sandbox/tracing
                                                   'syndicate/trie
@@ -50,7 +54,12 @@
                                        'syndicate/drivers/timestate)
                       '(void (init-session)))))
   (define trace-chan (evaluator '(let () (local-require syndicate-sandbox/tracing) (current-trace-channel))))
-  (session id evaluator std-in err-in trace-chan))
+  (session id evaluator std-in err-in trace-chan source-name-box))
+
+(define ((make-sandbox-reader source-name-box) _sandbox-src)
+  (define name (unbox source-name-box))
+  (for/list ([x (in-producer (lambda () (read-syntax name)) eof)])
+    x))
 
 (module sandbox-init racket/base
   (provide init-session)
@@ -84,6 +93,7 @@
       (async-channel-get ready-chan)
       (repl-activate syndicate/drivers/timestate))))
 
+
 (define (kill-session s)
   (kill-evaluator (session-sandbox-eval s)))
 
@@ -105,13 +115,8 @@
         (format "session-eval-~a-~a"
                 (session-id s)
                 (current-inexact-milliseconds))))
-
-  (define input-string (if (string? input) input (format "~s" input)))
-  (with-input-from-string input-string
-    (lambda ()
-      (port-count-lines! (current-input-port))
-      (define stx (read-syntax unique-source-name))
-      ((session-sandbox-eval s) stx))))
+  (set-box! (session-source-name-box s) unique-source-name)
+  ((session-sandbox-eval s) input))
 
 (define (call-in-session-context s f)
   (call-in-sandbox-context (session-sandbox-eval s) f))
@@ -349,4 +354,10 @@
     (check-not-equal? (first srclocs)
                       (second srclocs))
     (check-equal? (list->set (map srcloc-source srclocs))
-                  (set "source-1" "source-2"))))
+                  (set "source-1" "source-2")))
+
+  (test-case
+      "sandbox evaluates multiple expressions with each interaction"
+    (define s (new-session))
+    (define r (session-eval s "(define x 5) (+ x 2)"))
+    (check-equal? r 7)))
