@@ -2,6 +2,7 @@
 (define collection 'multi)
 (define deps '("base"
                "rackunit"
+               "sandbox-lib"
                "syndicate-classic"
                "web-server-lib"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
