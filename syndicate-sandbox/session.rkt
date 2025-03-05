@@ -130,234 +130,241 @@
     (current-memory-use custodian)))
 
 (module+ test
-  (test-case
-      "can create a sandbox session"
-    (parameterize ([current-custodian (make-custodian)])
-      (check-true (session? (new-session)))))
+  (require rackunit/text-ui)
+  (void
+   (run-tests
+    (test-suite
+     "Sandbox tests"
+     #:before collect-garbage
+     (test-case
+         "can create a sandbox session"
+       (parameterize ([current-custodian (make-custodian)])
+         (check-true (session? (new-session)))))
 
-  (test-case
-      "can interact with syndicate repl in sandbox"
-    (define s (new-session))
-    (check-true (session-alive? s))
-    (check-equal? (session-eval s '(do-assert 'hello))
-                  'ok)
-    (check-equal? (session-eval s '(begin (require syndicate/trie)
-                                          (trie-key-set/single (do-query 'hello))))
-                  (set 'hello))
-    (flush-session s)
-    (check-equal? (session-eval s '(spawn (on-start (display 'jeepers))))
-                  'ok)
-    (sleep 0.1)
-    (check-equal? (get-session-output s)
-                  "jeepers"))
+     (test-case
+         "can interact with syndicate repl in sandbox"
+       (define s (new-session))
+       (check-true (session-alive? s))
+       (check-equal? (session-eval s '(do-assert 'hello))
+                     'ok)
+       (check-equal? (session-eval s '(begin (require syndicate/trie)
+                                             (trie-key-set/single (do-query 'hello))))
+                     (set 'hello))
+       (flush-session s)
+       (check-equal? (session-eval s '(spawn (on-start (display 'jeepers))))
+                     'ok)
+       (sleep 0.1)
+       (check-equal? (get-session-output s)
+                     "jeepers"))
 
-  (test-case
-      "can define and work with structs in the sandbox"
-    (define s (new-session))
-    (session-eval s '(struct dog (spots) #:transparent))
-    (check-equal? (session-eval s '(do-assert (dog 14)))
-                  'ok)
-    (check-equal? (session-eval s '(do-query/set (dog (?!))))
-                  (set 14)))
+     (test-case
+         "can define and work with structs in the sandbox"
+       (define s (new-session))
+       (session-eval s '(struct dog (spots) #:transparent))
+       (check-equal? (session-eval s '(do-assert (dog 14)))
+                     'ok)
+       (check-equal? (session-eval s '(do-query/set (dog (?!))))
+                     (set 14)))
 
-  (test-case
-      "can get output from sandbox"
-    (define s (new-session))
-    (flush-session s)
-    (check-equal? (get-session-output s) "")
-    (session-eval s '(display 'worry))
-    (check-equal? (get-session-output s) "worry")
-    (check-equal? (get-session-output s) ""))
+     (test-case
+         "can get output from sandbox"
+       (define s (new-session))
+       (flush-session s)
+       (check-equal? (get-session-output s) "")
+       (session-eval s '(display 'worry))
+       (check-equal? (get-session-output s) "worry")
+       (check-equal? (get-session-output s) ""))
 
-  (test-case
-      "can get error output from sandbox"
-    (define s (new-session))
-    (sleep 0.1)
-    (flush-session s)
-    (check-equal? "" (get-session-error-output s))
-    (session-eval s '(display 'worry (current-error-port)))
-    (check-equal? (get-session-error-output s) "worry")
-    (check-equal? (get-session-error-output s) ""))
+     (test-case
+         "can get error output from sandbox"
+       (define s (new-session))
+       (sleep 0.1)
+       (flush-session s)
+       (check-equal? "" (get-session-error-output s))
+       (session-eval s '(display 'worry (current-error-port)))
+       (check-equal? (get-session-error-output s) "worry")
+       (check-equal? (get-session-error-output s) ""))
 
-  (test-case
-      "sandbox raises when evaluated expression throws an exception"
-    (define s (new-session))
-    (check-exn exn:fail?
-               (lambda () (session-eval s "(error 'woops)"))))
+     (test-case
+         "sandbox raises when evaluated expression throws an exception"
+       (define s (new-session))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s "(error 'woops)"))))
 
-  (test-case
-      "sandbox raises an exception when given invalid syntax"
-    (define s (new-session))
-    (check-exn exn:fail?
-               (lambda () (session-eval s "(+ 1 3"))))
+     (test-case
+         "sandbox raises an exception when given invalid syntax"
+       (define s (new-session))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s "(+ 1 3"))))
 
-  (test-case
-      "sandbox raises an exception when memory limit is reached"
-    (define s (new-session))
-    (define allocator '(let loop ([l (list)])
-                         (loop (cons 1 l))))
-    (check-exn #rx"out of memory|out-of-memory"
-               (lambda () (session-eval s allocator))))
+     (test-case
+         "sandbox raises an exception when memory limit is reached"
+       (define s (new-session))
+       (define allocator '(let loop ([l (list)])
+                            (loop (cons 1 l))))
+       (check-exn #rx"out of memory|out-of-memory"
+                  (lambda () (session-eval s allocator))))
 
-  (test-case
-      "sandbox memory limit with make-bytes allocator"
-    (define s (new-session))
-    (define allocator `(for/list ([i (in-range ,(+ 4 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
-                         (collect-garbage)
-                         (make-bytes 1000000)))
-    (check-exn #rx"out of memory"
-               (lambda () (session-eval s allocator))))
+     (test-case
+         "sandbox memory limit with make-bytes allocator"
+       (define s (new-session))
+       (define allocator `(for/list ([i (in-range ,(+ 4 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
+                            (collect-garbage)
+                            (make-bytes 1000000)))
+       (check-exn #rx"out of memory"
+                  (lambda () (session-eval s allocator))))
 
-  (test-case
-      "sandbox memory limit with set! allocator"
-    (define s (new-session))
-    (define allocator `(let ()
-                        (define a '())
-                        (for ([i (in-range ,(add1 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
-                          (set! a (cons (make-bytes 1000000) a))
-                          (collect-garbage))))
-    (check-exn #rx"out of memory"
-               (lambda () (session-eval s allocator))))
+     (test-case
+         "sandbox memory limit with set! allocator"
+       (define s (new-session))
+       (define allocator `(let ()
+                            (define a '())
+                            (for ([i (in-range ,(add1 DEFAULT-INTERACTION-MEMORY-LIMIT-MB))])
+                              (set! a (cons (make-bytes 1000000) a))
+                              (collect-garbage))))
+       (check-exn #rx"out of memory"
+                  (lambda () (session-eval s allocator))))
 
-  #;(test-case
-      "sandbox memory limit with set! allocator, top level"
-    (define s (new-session #:memory 2))
-    (session-eval s '(define a (list)))
-    #;(define allocator "(define a '())
+     #;(test-case
+           "sandbox memory limit with set! allocator, top level"
+         (define s (new-session #:memory 2))
+         (session-eval s '(define a (list)))
+         #;(define allocator "(define a '())
                        (for ([i (in-range 100)])
                          (set! a (cons (make-bytes 1000000) a))
                          (collect-garbage))")
-    (define allocator `(begin
-                         (set! a (cons (make-bytes 1000000) a))
-                         (collect-garbage)))
-    (check-exn exn:fail:resource?
-               (lambda () (for ([i (in-range 5)])
-                            (session-eval s allocator)))))
+         (define allocator `(begin
+                              (set! a (cons (make-bytes 1000000) a))
+                              (collect-garbage)))
+         (check-exn exn:fail:resource?
+                    (lambda () (for ([i (in-range 5)])
+                                 (session-eval s allocator)))))
 
-  (test-case
-      "sandbox enforces shallow time limit"
-    (define s (new-session))
-    (session-eval s '(require (only-in racket [sleep rkt:sleep])))
-    (define code `(begin (rkt:sleep ,(add1 DEFAULT-INTERACTION-TIME-LIMIT-S)) 'done))
-    (check-exn exn:fail:resource?
-               (lambda () (session-eval s code)))
-    (check-exn #rx"out of time"
-               (lambda () (session-eval s code))))
+     (test-case
+         "sandbox enforces shallow time limit"
+       (define s (new-session))
+       (session-eval s '(require (only-in racket [sleep rkt:sleep])))
+       (define code `(begin (rkt:sleep ,(add1 DEFAULT-INTERACTION-TIME-LIMIT-S)) 'done))
+       (check-exn exn:fail:resource?
+                  (lambda () (session-eval s code)))
+       (check-exn #rx"out of time"
+                  (lambda () (session-eval s code))))
 
-  (test-case
-      "sandbox kills created threads"
-    (define s (new-session))
-    (session-eval s '(require (only-in racket [sleep rkt:sleep])))
-    (define t (session-eval s '(thread (lambda () (rkt:sleep 10)))))
-    (sleep 0.1)
-    (check-true (thread-dead? t)))
+     (test-case
+         "sandbox kills created threads"
+       (define s (new-session))
+       (session-eval s '(require (only-in racket [sleep rkt:sleep])))
+       (define t (session-eval s '(thread (lambda () (rkt:sleep 10)))))
+       (sleep 0.1)
+       (check-true (thread-dead? t)))
 
-  (test-case
-      "sandbox restricts file system access"
-    (define s (new-session))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(directory-exists? "/"))))
-    (check-exn #rx"`exists' access denied"
-               (lambda () (session-eval s '(directory-exists? "/"))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(make-temporary-file))))
-    (check-exn #rx"`write' access denied"
-               (lambda () (session-eval s '(make-temporary-file))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(display-to-file 123 "./test.txt"))))
-    (check-exn #rx"`write' access denied"
-               (lambda () (session-eval s '(display-to-file 123 "./test.txt"))))
-    (check-not-exn (lambda () (session-eval s '(file->string "../info.rkt"))))
-    (check-not-exn (lambda () (session-eval s '(directory-list "../"))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(directory-list "../../"))))
-    (check-exn #rx"`read' access denied"
-               (lambda () (session-eval s '(directory-list "../../"))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(directory-list "/"))))
-    (check-exn #rx"`read' access denied"
-               (lambda () (session-eval s '(directory-list "/")))))
+     (test-case
+         "sandbox restricts file system access"
+       (define s (new-session))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(directory-exists? "/"))))
+       (check-exn #rx"`exists' access denied"
+                  (lambda () (session-eval s '(directory-exists? "/"))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(make-temporary-file))))
+       (check-exn #rx"`write' access denied"
+                  (lambda () (session-eval s '(make-temporary-file))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(display-to-file 123 "./test.txt"))))
+       (check-exn #rx"`write' access denied"
+                  (lambda () (session-eval s '(display-to-file 123 "./test.txt"))))
+       (check-not-exn (lambda () (session-eval s '(file->string "../info.rkt"))))
+       (check-not-exn (lambda () (session-eval s '(directory-list "../"))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(directory-list "../../"))))
+       (check-exn #rx"`read' access denied"
+                  (lambda () (session-eval s '(directory-list "../../"))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(directory-list "/"))))
+       (check-exn #rx"`read' access denied"
+                  (lambda () (session-eval s '(directory-list "/")))))
 
-  (test-case
-      "sandbox restricts network access"
-    (define s (new-session))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(tcp-listen 4040))))
-    (check-exn #rx"network access denied"
-               (lambda () (session-eval s '(tcp-listen 4040))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(tcp-connect "localhost" 4040))))
-    (check-exn #rx"network access denied"
-               (lambda () (session-eval s '(tcp-connect "localhost" 4040)))))
+     (test-case
+         "sandbox restricts network access"
+       (define s (new-session))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(tcp-listen 4040))))
+       (check-exn #rx"network access denied"
+                  (lambda () (session-eval s '(tcp-listen 4040))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(tcp-connect "localhost" 4040))))
+       (check-exn #rx"network access denied"
+                  (lambda () (session-eval s '(tcp-connect "localhost" 4040)))))
 
-  (test-case
-      "sandbox restricts system calls"
-    (define s (new-session))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(system "echo hi"))))
-    (check-exn #rx"`execute' access denied"
-               (lambda () (session-eval s '(system "echo hi"))))
-    (check-exn exn:fail?
-               (lambda () (session-eval s '(system* "echo" "hi"))))
-    (check-exn #rx"`execute' access denied"
-               (lambda () (session-eval s '(system* "echo" "hi")))))
+     (test-case
+         "sandbox restricts system calls"
+       (define s (new-session))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(system "echo hi"))))
+       (check-exn #rx"`execute' access denied"
+                  (lambda () (session-eval s '(system "echo hi"))))
+       (check-exn exn:fail?
+                  (lambda () (session-eval s '(system* "echo" "hi"))))
+       (check-exn #rx"`execute' access denied"
+                  (lambda () (session-eval s '(system* "echo" "hi")))))
 
-  (test-case
-      "syndicate-repl logging goes to sandbox stderr"
-    (define s (new-session))
-    (sleep 0.1)
-    (define output (get-session-error-output s))
-    (check-true (regexp-match? #rx"syndicate-repl:"
-                               output)
-                output))
+     (test-case
+         "syndicate-repl logging goes to sandbox stderr"
+       (define s (new-session))
+       (sleep 0.1)
+       (define output (get-session-error-output s))
+       (check-true (regexp-match? #rx"syndicate-repl:"
+                                  output)
+                   output))
 
-  (test-case
-      "receive trace events from session"
-    (define s (new-session))
-    (sleep 0.1)
-    (define evt (async-channel-try-get (session-trace-chan s)))
-    (check-true (notification? evt)))
+     (test-case
+         "receive trace events from session"
+       (define s (new-session))
+       (sleep 0.1)
+       (define evt (async-channel-try-get (session-trace-chan s)))
+       (check-true (notification? evt)))
 
-  (test-case
-      "trace events are all serializable to json"
-    (define s (new-session))
-    (session-eval s "(spawn (for ([i (in-range 3)]) (react (field [x i]) (assert (x)))))")
-    (sleep 1/4)
-    (local-require "trace-combiner.rkt")
-    (let loop ()
-      (define evt (async-channel-try-get (session-trace-chan s)))
-      (when evt
-        (check-not-exn (lambda () (notification->json evt)))
-        (loop))))
+     (test-case
+         "trace events are all serializable to json"
+       (define s (new-session))
+       (session-eval s "(spawn (for ([i (in-range 3)]) (react (field [x i]) (assert (x)))))")
+       (sleep 1/4)
+       (local-require "trace-combiner.rkt")
+       (let loop ()
+         (define evt (async-channel-try-get (session-trace-chan s)))
+         (when evt
+           (check-not-exn (lambda () (notification->json evt)))
+           (loop))))
 
-  (test-case
-      "repl log doesn't cross talk between sessions"
-    (define s1 (new-session))
-    (sleep 1/10)
-    (define s2 (new-session))
-    (sleep 1/10)
-    (check-false (string-contains? (get-session-error-output s1) (get-session-error-output s2))))
+     (test-case
+         "repl log doesn't cross talk between sessions"
+       (define s1 (new-session))
+       (sleep 1/10)
+       (define s2 (new-session))
+       (sleep 1/10)
+       (check-false (string-contains? (get-session-error-output s1) (get-session-error-output s2))))
 
-  (test-case
-      "source locations reflect different session interactions"
-    (define s1 (new-session))
-    (session-eval s1 "(spawn (assert 'hello))" "source-1")
-    (session-eval s1 "(spawn (assert 'hello))" "source-2")
-    (sleep 1/10)
-    (define actors (notification-detail (last (filter actors-notification? (channel->list (session-trace-chan s1))))))
-    (define srclocs
-      (for*/list ([actor-detail (in-hash-values actors)]
-                  [facet-detail (in-hash-values actor-detail)]
-                  [ep (in-list (facet-eps facet-detail))])
-        (endpoint-src ep)))
-    (check-equal? (length srclocs) 2)
-    (check-not-equal? (first srclocs)
-                      (second srclocs))
-    (check-equal? (list->set (map srcloc-source srclocs))
-                  (set "source-1" "source-2")))
+     (test-case
+         "source locations reflect different session interactions"
+       (define s1 (new-session))
+       (session-eval s1 "(spawn (assert 'hello))" "source-1")
+       (session-eval s1 "(spawn (assert 'hello))" "source-2")
+       (sleep 1/10)
+       (define actors (notification-detail (last (filter actors-notification? (channel->list (session-trace-chan s1))))))
+       (define srclocs
+         (for*/list ([actor-detail (in-hash-values actors)]
+                     [facet-detail (in-hash-values actor-detail)]
+                     [ep (in-list (facet-eps facet-detail))])
+           (endpoint-src ep)))
+       (check-equal? (length srclocs) 2)
+       (check-not-equal? (first srclocs)
+                         (second srclocs))
+       (check-equal? (list->set (map srcloc-source srclocs))
+                     (set "source-1" "source-2")))
 
-  (test-case
-      "sandbox evaluates multiple expressions with each interaction"
-    (define s (new-session))
-    (define r (session-eval s "(define x 5) (+ x 2)"))
-    (check-equal? r 7)))
+     (test-case
+         "sandbox evaluates multiple expressions with each interaction"
+       (define s (new-session))
+       (define r (session-eval s "(define x 5) (+ x 2)"))
+       (check-equal? r 7)))
+    )))
