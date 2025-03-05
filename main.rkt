@@ -9,18 +9,19 @@
                                          (string->number p)
                                          4001))))
 
-(command-line
- #:once-each
- [("-l") "listen on all IP addresses"
-         (serve-host #f)]
- [("--host") h "specify the host IP addr of the server"
-                  (serve-host h)]
- [("-p" "--port") p "specify the port of the server"
-                  (serve-port (string->number p))]
- [("--phx-host") ph "Specify the hostname of the phoenix server"
-                 (phx-host ph)]
- [("--phx-port") pp "Specify the port number for the phoenix server"
-                 (phx-port (string->number pp))]
- #:args ()
- (run-server #:port (serve-port)
-             #:host (serve-host)))
+(module+ main
+  (command-line
+   #:once-each
+   [("-l") "listen on all IP addresses"
+           (serve-host #f)]
+   [("--host") h "specify the host IP addr of the server"
+               (serve-host h)]
+   [("-p" "--port") p "specify the port of the server"
+                    (serve-port (string->number p))]
+   [("--phx-host") ph "Specify the hostname of the phoenix server"
+                   (phx-host ph)]
+   [("--phx-port") pp "Specify the port number for the phoenix server"
+                   (phx-port (string->number pp))]
+   #:args ()
+   (run-server #:port (serve-port)
+               #:host (serve-host))))
