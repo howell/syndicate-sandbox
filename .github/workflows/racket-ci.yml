@@ -1,0 +1,31 @@
+name: Racket CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Racket
+      uses: Bogdanp/setup-racket@v1.9
+      with:
+        architecture: 'x64'
+        distribution: 'full'
+        variant: 'CS'
+        version: '8.15'
+
+    - name: Install dependencies
+      run: raco pkg install --auto --batch
+
+    - name: Build package
+      run: raco setup --check-pkg-deps --pkgs syndicate-sandbox
+
+    - name: Run tests
+      run: raco test -p syndicate-sandbox
