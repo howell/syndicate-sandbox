@@ -352,8 +352,8 @@
        (sleep 1/10)
        (define actors (notification-detail (last (filter actors-notification? (channel->list (session-trace-chan s1))))))
        (define srclocs
-         (for*/list ([actor-detail (in-hash-values actors)]
-                     [facet-detail (in-hash-values actor-detail)]
+         (for*/list ([ad (in-hash-values actors)]
+                     [facet-detail (in-hash-values (actor-detail-facets ad))]
                      [ep (in-list (facet-eps facet-detail))])
            (endpoint-src ep)))
        (check-equal? (length srclocs) 2)

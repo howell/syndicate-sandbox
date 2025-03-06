@@ -15,7 +15,8 @@ an association between each actor's facets and endpoints
          racket/async-channel
          syndicate/trace
          (prefix-in synd: (submod syndicate/actor implementation-details))
-         (prefix-in synd: syndicate/core))
+         (prefix-in synd: syndicate/core)
+         (prefix-in synd: syndicate/dataflow))
 
 (module+ test
   (require rackunit
@@ -60,13 +61,18 @@ an association between each actor's facets and endpoints
 ;; ActorEnv PID ActorState EndpointNotification -> ActorEnv
 (define (associate-endpoint env pid proc-state evt)
   (define fid (endpoint-notification-fid evt))
-  (define (update-actor existing-facets)
-    (if (hash-has-key? existing-facets fid)
-        (hash-update existing-facets
-                     fid
-                     (lambda (fct) (add-notification fct proc-state evt)))
-        existing-facets))
-  (hash-update env pid update-actor (hash)))
+  (define (update-actor ad)
+    (define existing-facets (actor-detail-facets ad))
+    (cond
+      [(hash-has-key? existing-facets fid)
+       (define updated
+         (hash-update existing-facets
+                      fid
+                      (lambda (fct) (add-notification fct proc-state evt))))
+       (struct-copy actor-detail ad [facets updated])]
+      [else
+       ad]))
+  (hash-update env pid update-actor (lambda () (actor-detail (hash) #f))))
 
 ;; Facet ActorState EndpointNotification -> Facet
 (define (add-notification fct proc-state evt)
@@ -80,7 +86,7 @@ an association between each actor's facets and endpoints
 
 (define (add-ep fct desc src)
   (struct-copy facet fct
-               [eps (cons (endpoint desc src)
+               [eps (cons (endpoint (first desc) (second desc) src)
                           (facet-eps fct))]))
 
 (define (add-field fct proc-state handle src)
@@ -104,15 +110,16 @@ an association between each actor's facets and endpoints
      (define actors* (hash-update actors
                                   pid
                                   (curryr update-process-state proc-state)
-                                  (hash)))
+                                  (lambda () (actor-detail (hash) #f))))
 
      (define this-actor (hash-ref actors* pid))
+     (define this-actor-facets (actor-detail-facets this-actor))
 
      ;; Find endpoint notifications that match facet IDs in this actor
      (define-values (matching-evts other-evts)
        (partition (lambda (evt)
                     (and (endpoint-notification? evt)
-                         (hash-has-key? this-actor (endpoint-notification-fid evt))))
+                         (hash-has-key? this-actor-facets (endpoint-notification-fid evt))))
                   pending-endpoint-evts))
 
      (values (apply-pending-evts actors* pid proc-state matching-evts)
@@ -125,24 +132,26 @@ an association between each actor's facets and endpoints
 
 ;; ActorDetail ActorState -> ActorDetail
 ;; Update the information associated with an actor's facets based on the observed state of the process
-(define (update-process-state facets as)
+(define (update-process-state ad as)
   (define live-facets (synd:actor-state-facets as))
   (define field-table (synd:actor-state-field-table as))
 
   (define facets-with-new
     (for/hash ([(fid live-facet) (in-hash live-facets)])
-      (define existing-info (hash-ref facets fid (lambda () (make-facet fid))))
+      (define existing-info (hash-ref (actor-detail-facets ad) fid (lambda () (make-facet fid))))
       (define with-children (struct-copy facet existing-info
                                          [children (synd:facet-children live-facet)]))
       (values fid
               with-children)))
 
-  ;; Update all facets with current field values
-  (for/hash ([(fid fct) (in-hash facets-with-new)])
-    (values fid
-            (struct-copy facet fct
-                         [fields (update-field-values (facet-fields fct)
-                                                      field-table)]))))
+  (define facets-with-fields
+    (for/hash ([(fid fct) (in-hash facets-with-new)])
+      (values fid
+              (struct-copy facet fct
+                           [fields (update-field-values (facet-fields fct)
+                                                        field-table)]))))
+  (actor-detail facets-with-fields
+                (synd:actor-state-field-dataflow as)))
 
 ;; (Listof Field) FieldTable -> (Listof Field)
 ;; Update field values from the current field table
@@ -174,33 +183,38 @@ an association between each actor's facets and endpoints
           (check-not-false env-evt)
           (check-match (notification-detail env-evt)
                        (hash '(2)
-                             (hash '(4)
-                                   (facet '(4)
-                                          '()
-                                          (list (endpoint '(stx:assert 'hello)
-                                                          (? srcloc?)))
-                                          (== (set))))
+                             (actor-detail
+                              (hash '(4)
+                                    (facet '(4)
+                                           '()
+                                           (list (endpoint (? exact-integer?)
+                                                           '(stx:assert 'hello)
+                                                           (? srcloc?)))
+                                           (== (set))))
+                              (? synd:dataflow-graph?))
                              #:open))))))
 
   (test-case "update-process-state removes dead facets"
     (define test-facets
       (hash '(1) (make-facet '(1))
             '(2) (make-facet '(2))))
+    (define test-detail (actor-detail test-facets #f))
     (define test-state
       (synd:actor-state (void)
                         (hash '(1) (synd:facet '(1) (hash) '() (set) #f #f))
                         (void) (void) (hash) (void)))
-    (check-equal? (hash-keys (update-process-state test-facets test-state))
+    (check-equal? (hash-keys (actor-detail-facets (update-process-state test-detail test-state)))
                   '((1))))
 
   (test-case "update-process-state updates children"
     (define test-facets
       (hash '(1) (make-facet '(1))))
+    (define test-detail (actor-detail test-facets #f))
     (define test-state
       (synd:actor-state (void)
                         (hash '(1) (synd:facet '(1) (hash) '() (set '(2) '(3)) #f #f))
                         (void) (void) (hash) (void)))
-    (check-equal? (facet-children (hash-ref (update-process-state test-facets test-state) '(1)))
+    (check-equal? (facet-children (hash-ref (actor-detail-facets (update-process-state test-detail test-state)) '(1)))
                   (set '(2) '(3))))
 
   (test-case "update-process-state updates field values"
@@ -208,6 +222,7 @@ an association between each actor's facets and endpoints
     (define test-facets
       (hash '(1) (struct-copy facet (make-facet '(1))
                               [fields (list (field test-handle 'old-value (void)))])))
+    (define test-detail (actor-detail test-facets #f))
     (define test-state
       (synd:actor-state (void)
                         (hash '(1) (synd:facet '(1) (hash) '() (set) #f #f))
@@ -215,20 +230,21 @@ an association between each actor's facets and endpoints
                         (hash (synd:field-handle-desc test-handle)
                               (make-ephemeron (synd:field-handle-desc test-handle) 'new-value))
                         (void)))
-    (check-equal? (field-val (car (facet-fields (hash-ref (update-process-state test-facets test-state) '(1)))))
+    (check-equal? (field-val (car (facet-fields (hash-ref (actor-detail-facets (update-process-state test-detail test-state)) '(1)))))
                   'new-value))
 
   (test-case "update-process-state adds new facets from actor state"
     (define test-facets (hash))
+    (define test-detail (actor-detail test-facets #f))
     (define test-state
       (synd:actor-state (void)
                         (hash '(1) (synd:facet '(1) (hash) '() (set '(2) '(3)) #f #f)
                               '(2) (synd:facet '(2) (hash) '() (set) #f #f))
                         (void) (void) (hash) (void)))
-    (define result (update-process-state test-facets test-state))
-    (check-equal? (hash-keys result) '((1) (2)))
-    (check-equal? (facet-children (hash-ref result '(1))) (set '(2) '(3)))
-    (check-equal? (facet-children (hash-ref result '(2))) (set)))
+    (define result (update-process-state test-detail test-state))
+    (check-equal? (hash-keys (actor-detail-facets result)) '((1) (2)))
+    (check-equal? (facet-children (hash-ref (actor-detail-facets result) '(1))) (set '(2) '(3)))
+    (check-equal? (facet-children (hash-ref (actor-detail-facets result) '(2))) (set)))
 
   (test-case "bank account example captures field value and both endpoints"
     (struct account (balance) #:prefab)
@@ -262,16 +278,18 @@ an association between each actor's facets and endpoints
           (check-not-false banker-pid)
           (check-match banker-pid (list (? (curry <= 2))))
           (check-true (hash-has-key? final-actors banker-pid))
-          (define banker-detail (hash-ref final-actors banker-pid))
+          (define banker-detail (actor-detail-facets (hash-ref final-actors banker-pid)))
           (check-equal? (hash-count banker-detail) 1)
           (match-define (list banker-root) (hash-values banker-detail))
           (check-match (facet-fields banker-root)
                        (list (field _ 0 _)))
           (check-equal? (length (facet-eps banker-root)) 2)
           (check-match (facet-eps banker-root)
-                       (list-no-order (endpoint '(stx:assert (account (balance)))
+                       (list-no-order (endpoint (? exact-integer?)
+                                                '(stx:assert (account (balance)))
                                                 _)
-                                      (endpoint '(stx:on (stx:message (deposit $amount))
+                                      (endpoint (? exact-integer?)
+                                                '(stx:on (stx:message (deposit $amount))
                                                          (balance (+ (balance) amount)))
                                                 _))))))))
 
@@ -290,9 +308,15 @@ an association between each actor's facets and endpoints
 
 ;; ActorEnv -> JSExpr
 (define (actor-env->json env)
-  (for/list ([(pid facets) (in-hash env)])
-    (hash 'actor_id (~a pid)
-          'facets (facets->json facets))))
+  (for/list ([(pid detail) (in-hash env)])
+    (hash-set (actor-detail->json detail)
+              'actor_id
+              (~a pid))))
+
+;; ActorDetail -> JSExpr
+(define (actor-detail->json ad)
+  (hash 'facets (facets->json (actor-detail-facets ad))
+        'dataflow (dataflow->json (actor-detail-dataflow ad))))
 
 ;; (Hashof FID FacetDetail) -> JSExpr
 (define (facets->json facets)
@@ -316,6 +340,7 @@ an association between each actor's facets and endpoints
 ;; Endpoint -> JSExpr
 (define (endpoint->json e)
   (hash 'description (~a (endpoint-description e))
+        'id (~a (endpoint-id e))
         'src (srcloc->json (endpoint-src e))))
 
 ;; SrcLoc -> JSExpr
@@ -325,6 +350,10 @@ an association between each actor's facets and endpoints
         'column (srcloc-column loc)
         'position (srcloc-position loc)
         'span (srcloc-span loc)))
+
+(define (dataflow->json dfg)
+  (for/list ([(obj subjs) (in-hash (synd:dataflow-graph-edges-forward dfg))])
+    (list (~a obj) (set-map subjs ~a))))
 
 (module+ test
   (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
@@ -338,9 +367,10 @@ an association between each actor's facets and endpoints
                        'span 10)))
 
   (test-case "endpoint->json converts endpoint"
-    (define test-endpoint (endpoint '(assert 'hello) sample-srcloc))
+    (define test-endpoint (endpoint 77 '(assert 'hello) sample-srcloc))
     (check-equal? (endpoint->json test-endpoint)
                  (hash 'description "(assert (quote hello))"
+                       'id "77"
                        'src (srcloc->json sample-srcloc))))
 
   (test-case "field->json converts field"
@@ -354,7 +384,7 @@ an association between each actor's facets and endpoints
   (test-case "facet->json converts facet"
     (define test-handle (synd:field-handle (synd:field-descriptor 'test 1)))
     (define test-field (field test-handle 'test-val sample-srcloc))
-    (define test-endpoint (endpoint 'test-desc sample-srcloc))
+    (define test-endpoint (endpoint 89 'test-desc sample-srcloc))
     (define test-facet
       (facet '(1)
              (list test-field)

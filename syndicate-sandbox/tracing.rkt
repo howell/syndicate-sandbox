@@ -43,7 +43,9 @@
 
 
 ;; an ActorEnv is a (Hashof PID ActorDetail)
-;; an ActorDetail is a (Hashof FID FacetDetail)
+
+;; an ActorDetail is a (actor-detail (Hashof FID FacetDetail) DataflowGraph)
+(struct actor-detail (facets dataflow) #:transparent)
 
 ;; a FacetDetail is a (facet FID (Listof Field) (Listof Endpoint) (Setof FID))
 (struct facet (id fields eps children) #:transparent)
@@ -51,7 +53,10 @@
 ;; a Field is a (field FieldHandle Any SrcLoc)
 (struct field (handle val src) #:transparent)
 
-;; an Endpoint is a (endpoint Any SrcLoc)
-(struct endpoint (description src) #:transparent)
+;; an Endpoint is a (endpoint EID Any SrcLoc)
+(struct endpoint (id description src) #:transparent)
 
+;; an EndpointNotification is one of
+;;   - (endpoint-notification FID 'endpoint (List EID Any) SrcLoc)
+;;   - (endpoint-notification FID 'field FieldHandle SrcLoc)
 (struct endpoint-notification (fid desc detail srcloc) #:transparent)

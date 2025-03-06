@@ -20,6 +20,7 @@
          )
 
 (require "tracing.rkt"
+         threading
          (prefix-in synd: syndicate/actor-lang)
          (prefix-in repl: syndicate/interactive-lang)
          (prefix-in synd: (submod syndicate/actor implementation-details))
@@ -44,8 +45,9 @@
     #:with the-ep this-syntax
     #:with src (quote-src this-syntax)
     (begin
-      (associate-endpoint! 'the-ep src)
-      (synd-name . body))))
+      (define pre-ids (current-facet-endpoint-ids))
+      (synd-name . body)
+      (associate-endpoint! 'the-ep src pre-ids))))
 
 (define-simple-macro (define-tracing-endpoints nm:id ...+)
   (begin
@@ -84,11 +86,15 @@
 (define-tracing-query define/query-count)
 (define-tracing-query define-field)
 
-(define (associate-endpoint! ep src)
+(define (associate-endpoint! ep src pre-ids)
   (when (current-endpoint-notification-handler)
+    (define post-ids (current-facet-endpoint-ids))
+    (define this-id (and pre-ids
+                         post-ids
+                         (set-first (set-subtract post-ids pre-ids))))
     ((current-endpoint-notification-handler) (endpoint-notification (synd:current-facet-id)
                                                           'endpoint
-                                                          ep
+                                                          (list this-id ep)
                                                           src))))
 
 (define (associate-field! nm src)
@@ -98,9 +104,16 @@
                                                           nm
                                                           src))))
 
-(module+ test
-  (require racket/port)
+(define (current-facet-endpoint-ids)
+  (and (cons? (synd:current-facet-id))
+       (and~> (synd:current-actor-state)
+              synd:actor-state-facets
+              (hash-ref _ (synd:current-facet-id))
+              (synd:facet-endpoints)
+              (hash-keys)
+              (list->set))))
 
+(module+ test
   (define-syntax-parse-rule (with-recording-handler store:id body ...+)
     (let ([store '()])
       (parameterize ([current-endpoint-notification-handler (lambda (evt)
@@ -114,7 +127,10 @@
       (with-test-dataspace [(synd:spawn (assert 'hello))]
         (check-true (asserted? 'hello))
         (check-match store
-                     (list (endpoint-notification (? list?) 'endpoint (== '(assert 'hello)) (? srcloc?)))))))
+                     (list (endpoint-notification (? list?)
+                                                  'endpoint
+                                                  (list (? exact-integer?) (== '(assert 'hello)))
+                                                  (? srcloc?)))))))
 
   (test-case "field associates field-handle with facet"
     (with-recording-handler store
@@ -122,15 +138,24 @@
                                         (assert (breakfast)))]
         (check-true (asserted? 'toast))
         (check-match store
-                     (list (endpoint-notification (? list?) 'endpoint (== '(assert (breakfast))) (? srcloc?))
-                           (endpoint-notification (? list?) 'field (synd:field-handle (synd:field-descriptor 'breakfast _)) (? srcloc?)))))))
+                     (list (endpoint-notification (? list?)
+                                                  'endpoint
+                                                  (list (? exact-integer?) (== '(assert (breakfast))))
+                                                  (? srcloc?))
+                           (endpoint-notification (? list?)
+                                                  'field
+                                                  (synd:field-handle (synd:field-descriptor 'breakfast _))
+                                                  (? srcloc?)))))))
 
   (test-case "simple query definition"
     (with-recording-handler store
       (with-test-dataspace [(synd:spawn (define/query-set brekkers (list 'breakfast $v) v))]
         (check-true (asserted? (synd:observe (list 'breakfast synd:?))))
         (check-match store
-                     (list (endpoint-notification (? list?) 'field (synd:field-handle (synd:field-descriptor 'brekkers _)) (? srcloc?)))))))
+                     (list (endpoint-notification (? list?)
+                                                  'field
+                                                  (synd:field-handle (synd:field-descriptor 'brekkers _))
+                                                  (? srcloc?)))))))
 
   (test-case "assert still works with repl"
     (with-recording-handler store
@@ -138,7 +163,10 @@
         (assert 'momma)
         (check-true (asserted? 'momma))
         (check-match store
-                     (list (endpoint-notification '() 'endpoint (== '(assert 'momma)) (? srcloc?)))))))
+                     (list (endpoint-notification '()
+                                                  'endpoint
+                                                  (list #f (== '(assert 'momma)))
+                                                  (? srcloc?)))))))
 
   (test-case "srcloc corresponds to use site and contains correct source"
     (with-recording-handler store
