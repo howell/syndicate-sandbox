@@ -354,7 +354,8 @@ an association between each actor's facets and endpoints
 
 (define (dataflow->json dfg)
   (for/list ([(obj subjs) (in-hash (synd:dataflow-graph-edges-forward dfg))])
-    (list (~a obj) (set-map subjs ~a))))
+    (hash 'source (~a obj)
+          'dests (set-map subjs ~a))))
 
 (module+ test
   (define sample-srcloc (srcloc "test.rkt" 1 5 50 10))
