@@ -309,9 +309,8 @@ an association between each actor's facets and endpoints
 ;; ActorEnv -> JSExpr
 (define (actor-env->json env)
   (for/list ([(pid detail) (in-hash env)])
-    (hash-set (actor-detail->json detail)
-              'actor_id
-              (~a pid))))
+    (hash 'actor_id (~a pid)
+          'detail (actor-detail->json detail))))
 
 ;; ActorDetail -> JSExpr
 (define (actor-detail->json ad)
