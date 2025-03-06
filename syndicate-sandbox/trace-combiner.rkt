@@ -333,7 +333,9 @@ an association between each actor's facets and endpoints
 
 ;; Field -> JSExpr
 (define (field->json f)
-  (hash 'name (~a (synd:field-descriptor-name (synd:field-handle-desc (field-handle f))))
+  (define descriptor (synd:field-handle-desc (field-handle f)))
+  (hash 'name (~a (synd:field-descriptor-name descriptor))
+        'id (~a (synd:field-descriptor-id descriptor))
         'value (~v (field-val f))
         'src (srcloc->json (field-src f))))
 
@@ -378,6 +380,7 @@ an association between each actor's facets and endpoints
     (define test-field (field test-handle 'test-val sample-srcloc))
     (check-equal? (field->json test-field)
                  (hash 'name "test"
+                       'id "1"
                        'value "'test-val"
                        'src (srcloc->json sample-srcloc))))
 
