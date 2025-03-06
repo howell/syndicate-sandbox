@@ -80,7 +80,7 @@
   (log-sandbox-server-info "~a: Received code submission request with body ~a" (timestamp) msg)
   (define id (hash-ref msg 'session_id))
   (define code (hash-ref msg 'code))
-  (define source-name (hash-ref msg 'source_name (format "session-~a-unnamed" id)))
+  (define source-name (hash-ref msg 'name (format "session-~a-unnamed" id)))
   (response/jsexpr (hash 'status "ok" 'result (evaluate-code id code source-name))))
 
 (define (handle-keep-alive req)
