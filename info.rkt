@@ -4,7 +4,8 @@
                "rackunit"
                "sandbox-lib"
                "syndicate-classic"
-               "web-server-lib"))
+               "web-server-lib"
+               "threading-lib"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/syndicate-sandbox.scrbl" ())))
 (define pkg-desc "Description Here")
