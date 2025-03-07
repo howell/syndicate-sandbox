@@ -31,7 +31,7 @@ an association between each actor's facets and endpoints
 
 ;; (Channelof CombinedNotification) -> TraceEventHandler
 (define (make-combined-tracer [ch (current-trace-channel)])
-  (define curr-ds (dataspace (hash) #f '() '() #f))
+  (define curr-ds (dataspace (hash) #f '() #f))
   (define curr-actors (hash))
   ;; because the actor's behavior and state are initialized BEFORE the spawn trace event, we need to keep these around
   (define pending-endpoint-evts '())

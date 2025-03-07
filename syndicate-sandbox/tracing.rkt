@@ -27,10 +27,9 @@
 ;; a Dataspace is a
 ;; (dataspace (Hashof ActorPath Actor)
 ;;            (Optionof (List ActorPath Event (Optionof (Listof Action))))
-;;            (Listof Any)
 ;;            (Listof PendingAction)
 ;;            (Optionof Symbol))
-(struct dataspace (actors active recent-messages pending-acts last-op) #:transparent)
+(struct dataspace (actors active pending-acts last-op) #:transparent)
 
 ;; an Actor is a (actor Name Trie (Listof Event))
 (struct actor (name assertions) #:transparent)
